@@ -1,0 +1,29 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Providers;
+
+use AlexPavliukov\Authorization\Authorization;
+use AlexPavliukov\Authorization\Enums\SystemAbility;
+use App\Enums\Policies\Role;
+use App\Models\User;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\ServiceProvider;
+
+final class AuthorizationServiceProvider extends ServiceProvider
+{
+    public function boot(): void
+    {
+        Authorization::useRoleEnum(Role::class);
+
+        Authorization::authorizableModels([
+            User::class,
+        ]);
+
+        Gate::define(SystemAbility::ACCESS_PLATFORM_ADMIN, static fn (): bool => false);
+
+        // Override the default RoleBypass if needed, e.g.:
+        // Authorization::bypassUsing(\AlexPavliukov\Authorization\Support\NoBypass::class);
+    }
+}

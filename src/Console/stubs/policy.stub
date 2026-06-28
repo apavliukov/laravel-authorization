@@ -1,0 +1,16 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Policies;
+
+use AlexPavliukov\Authorization\AbstractPolicy;
+use App\Models\{{ model }};
+
+final readonly class {{ model }}Policy extends AbstractPolicy
+{
+    protected function getModelClass(): string
+    {
+        return {{ model }}::class;
+    }
+}

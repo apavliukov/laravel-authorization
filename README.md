@@ -1,0 +1,255 @@
+# Laravel Authorization
+
+A reusable, Spatie-permission-based authorization layer for Laravel: resource
+policies, ability enums, role semantics, a permission registry, idempotent
+seeding, and a pluggable admin bypass.
+
+The package owns the generic core. Your application keeps only what is genuinely
+app-specific: the role enum, concrete policies, the user model, and the
+declarations wiring them together.
+
+## Requirements
+
+- PHP `^8.4`
+- Laravel `^13.0`
+- [`spatie/laravel-permission`](https://spatie.be/docs/laravel-permission) `^7.4`
+
+## Installation
+
+The package is distributed as a private Composer package via VCS.
+
+```jsonc
+// composer.json
+"repositories": [
+    { "type": "vcs", "url": "git@github.com:apavliukov/laravel-authorization.git" }
+],
+"require": {
+    "apavliukov/laravel-authorization": "dev-main"
+}
+```
+
+```bash
+composer require apavliukov/laravel-authorization:dev-main
+```
+
+Make sure Spatie's permission tables are migrated (publish and run its migrations
+if you have not already):
+
+```bash
+php artisan vendor:publish --provider="Spatie\Permission\PermissionServiceProvider"
+php artisan migrate
+```
+
+The package's core `AuthorizationServiceProvider` is auto-discovered. It registers
+the bindings, the `Gate::before` bypass hook, the `make:authorization-policy`
+command, and (when Spatie teams are enabled) the team middleware.
+
+## Setup
+
+### 1. Publish and register the app provider
+
+```bash
+php artisan vendor:publish --tag=authorization-provider
+```
+
+This writes `app/Providers/AuthorizationServiceProvider.php` — the one place where
+your application declares its role enum, authorizable models, and system
+abilities. Register it in `bootstrap/providers.php`:
+
+```php
+return [
+    App\Providers\AppServiceProvider::class,
+    App\Providers\AuthorizationServiceProvider::class,
+];
+```
+
+The published provider looks like this:
+
+```php
+use AlexPavliukov\Authorization\Authorization;
+use AlexPavliukov\Authorization\Enums\SystemAbility;
+use App\Enums\Policies\Role;
+use App\Models\User;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\ServiceProvider;
+
+final class AuthorizationServiceProvider extends ServiceProvider
+{
+    public function boot(): void
+    {
+        Authorization::useRoleEnum(Role::class);
+
+        Authorization::authorizableModels([
+            User::class,
+        ]);
+
+        Gate::define(SystemAbility::ACCESS_PLATFORM_ADMIN, static fn (): bool => false);
+    }
+}
+```
+
+### 2. Implement the role enum
+
+Your role enum implements `AuthorizationRole`. `isSuperAdmin()` drives the bypass;
+`permissions()` is consumed by the seeder to grant per-role permissions.
+
+```php
+use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
+
+enum Role: string implements AuthorizationRole
+{
+    case ADMIN = 'admin';
+    case MEMBER = 'member';
+
+    public function isSuperAdmin(): bool
+    {
+        return $this === self::ADMIN;
+    }
+
+    /** @return array<int, string> */
+    public function permissions(): array
+    {
+        return match ($this) {
+            self::ADMIN, self::MEMBER => [],
+        };
+    }
+}
+```
+
+Role presentation (labels, colors, layouts) is app-specific and stays out of the
+package — keep it on the enum or in a dedicated trait of your own.
+
+### 3. Prepare the user model
+
+The package relies on Spatie's `HasRoles`. Add `HasPolicy` so the model declares
+which abilities generate permissions for it.
+
+```php
+use AlexPavliukov\Authorization\Concerns\HasPolicy;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Spatie\Permission\Traits\HasRoles;
+
+class User extends Authenticatable
+{
+    use HasPolicy;
+    use HasRoles;
+}
+```
+
+## Policies
+
+Concrete policies extend `AbstractPolicy` and declare their model. The seven CRUD
+methods map each ability to a permission string and check it against the user.
+
+```php
+use AlexPavliukov\Authorization\AbstractPolicy;
+
+final readonly class PostPolicy extends AbstractPolicy
+{
+    protected function getModelClass(): string
+    {
+        return Post::class;
+    }
+}
+```
+
+Scaffold one with the generator:
+
+```bash
+php artisan make:authorization-policy Post
+```
+
+## Abilities and permission names
+
+- `Enums\Ability` — the seven standard resource abilities (1:1 with policy
+  methods). Values are camelCase so Gate routes them straight to policy methods.
+- `Enums\SystemAbility` — standalone `Gate::define()` checks with no model.
+- Model-specific abilities are added by overriding `HasPolicy::getCustomAbilities()`:
+
+```php
+public static function getCustomAbilities(): array
+{
+    return PostAbility::cases();
+}
+```
+
+`PermissionRegistry` converts an ability + model into a permission string, e.g.
+`Ability::VIEW_ANY` + `User` → `"view any users"`.
+
+## Admin bypass
+
+`Gate::before` is wired through a pluggable `BypassStrategy`, resolved from the
+container lazily on each check.
+
+- **`Support\RoleBypass` (default)** — holders of a super-admin role bypass every
+  check. It accepts an optional list of *protected* abilities that always fall
+  through to policies:
+
+  ```php
+  use AlexPavliukov\Authorization\Authorization;
+  use AlexPavliukov\Authorization\Enums\Ability;
+  use AlexPavliukov\Authorization\Support\RoleBypass;
+
+  Authorization::bypassUsing(new RoleBypass(
+      app(\AlexPavliukov\Authorization\AuthorizationManager::class),
+      protected: [Ability::FORCE_DELETE],
+  ));
+  ```
+
+- **`Support\NoBypass`** — no god-mode; every check goes through Spatie/policies:
+
+  ```php
+  Authorization::bypassUsing(\AlexPavliukov\Authorization\Support\NoBypass::class);
+  ```
+
+You can also override the strategy by rebinding the contract in the container:
+
+```php
+$this->app->bind(
+    \AlexPavliukov\Authorization\Contracts\BypassStrategy::class,
+    \App\Authorization\YourStrategy::class,
+);
+```
+
+**Guiding principle:** a super-admin has the right to do everything. Real "can't"s
+are business invariants enforced in the Action/domain layer, not authorization.
+`protected` / `NoBypass` exist only for genuine authorization-level carve-outs
+(separation of duties, break-glass).
+
+## Seeding
+
+`Database\AuthorizationSeeder` syncs permissions (from your authorizable models)
+and roles (from each enum case's `permissions()`). It is idempotent — call it from
+your own seeder:
+
+```php
+public function run(): void
+{
+    $this->call([
+        \AlexPavliukov\Authorization\Database\AuthorizationSeeder::class,
+    ]);
+}
+```
+
+## Teams
+
+When Spatie native teams are enabled (`config('permission.teams') === true`), the
+core provider registers `SetPermissionsTeam` on the `web` middleware group. It
+resolves the current team id via the bound `TeamResolver` (default:
+`DefaultTeamResolver`, which reads the user's `team_foreign_key` attribute) and
+calls `setPermissionsTeamId()`. With teams off, none of this is wired.
+
+Provide a custom resolver with `Authorization::resolveTeamsUsing(YourResolver::class)`.
+
+## Development
+
+```bash
+composer install
+vendor/bin/phpunit          # test suite (Orchestra Testbench)
+vendor/bin/phpstan analyse  # static analysis, level 9
+vendor/bin/pint             # code style
+```
+
+## License
+
+MIT

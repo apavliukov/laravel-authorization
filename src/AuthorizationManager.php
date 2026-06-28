@@ -1,0 +1,105 @@
+<?php
+
+declare(strict_types=1);
+
+namespace AlexPavliukov\Authorization;
+
+use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
+use AlexPavliukov\Authorization\Contracts\BypassStrategy;
+use AlexPavliukov\Authorization\Contracts\TeamResolver;
+use BackedEnum;
+use RuntimeException;
+
+final class AuthorizationManager
+{
+    /** @var class-string<AuthorizationRole&BackedEnum>|null */
+    private ?string $roleEnum = null;
+
+    /** @var array<int, class-string> */
+    private array $models = [];
+
+    /** @var array<int, AuthorizationRole&BackedEnum>|null */
+    private ?array $superAdminRoles = null;
+
+    /** @param class-string<AuthorizationRole&BackedEnum> $roleEnum */
+    public function useRoleEnum(string $roleEnum): void
+    {
+        $this->roleEnum = $roleEnum;
+        $this->superAdminRoles = null;
+    }
+
+    /** @return class-string<AuthorizationRole&BackedEnum> */
+    public function roleEnum(): string
+    {
+        return $this->roleEnum ?? throw new RuntimeException('Role enum is not configured. Call Authorization::useRoleEnum() in AuthorizationServiceProvider.');
+    }
+
+    /** @param array<int, class-string> $models */
+    public function authorizableModels(array $models): void
+    {
+        $this->models = $models;
+    }
+
+    /** @return array<int, class-string> */
+    public function models(): array
+    {
+        return $this->models;
+    }
+
+    /**
+     * Role cases that bypass Gate::before. Memoized — the role enum is a
+     * boot-time declaration consulted on every authorization check.
+     *
+     * @return array<int, AuthorizationRole&BackedEnum>
+     */
+    public function superAdminRoles(): array
+    {
+        if ($this->superAdminRoles !== null) {
+            return $this->superAdminRoles;
+        }
+
+        $roleEnum = $this->roleEnum();
+
+        return $this->superAdminRoles = array_values(array_filter(
+            $roleEnum::cases(),
+            static fn (AuthorizationRole $role): bool => $role->isSuperAdmin(),
+        ));
+    }
+
+    /** @param class-string<TeamResolver>|TeamResolver $resolver */
+    public function resolveTeamsUsing(string|TeamResolver $resolver): void
+    {
+        $this->bind(TeamResolver::class, $resolver);
+    }
+
+    public function teamResolver(): TeamResolver
+    {
+        return resolve(TeamResolver::class);
+    }
+
+    /**
+     * Override the bypass strategy. BypassGate resolves BypassStrategy from the
+     * container lazily, so this takes effect regardless of provider boot order.
+     *
+     * @param  class-string<BypassStrategy>|BypassStrategy  $strategy
+     */
+    public function bypassUsing(string|BypassStrategy $strategy): void
+    {
+        $this->bind(BypassStrategy::class, $strategy);
+    }
+
+    /**
+     * @param  class-string  $abstract
+     * @param  class-string|object  $concrete
+     */
+    private function bind(string $abstract, string|object $concrete): void
+    {
+        if (is_object($concrete)) {
+            app()->instance($abstract, $concrete);
+
+            return;
+        }
+
+        app()->bind($abstract, $concrete);
+    }
+}
