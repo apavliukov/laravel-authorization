@@ -8,6 +8,7 @@ use AlexPavliukov\Authorization\AuthorizationManager;
 use AlexPavliukov\Authorization\PermissionRegistry;
 use Illuminate\Database\Eloquent\Model;
 use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 
 final readonly class PermissionSync
 {
@@ -18,6 +19,8 @@ final readonly class PermissionSync
 
     public function permissions(): void
     {
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
         /** @var class-string<Model> $permissionClass */
         $permissionClass = config('permission.models.permission');
 

@@ -17,7 +17,7 @@
         "illuminate/http": "^13.0",
         "illuminate/routing": "^13.0",
         "illuminate/support": "^13.0",
-        "spatie/laravel-permission": "^7.4"
+        "spatie/laravel-permission": "^8.0"
     },
     "require-dev": {
         "larastan/larastan": "^3.0",

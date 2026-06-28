@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Tests\Feature;
 
 use AlexPavliukov\Authorization\AbstractPolicy;
+use AlexPavliukov\Authorization\Tests\Fixtures\ScopedUserPolicy;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\Fixtures\UserPolicy;
 use AlexPavliukov\Authorization\Tests\TestCase;
@@ -45,5 +46,31 @@ final class AbstractPolicyTest extends TestCase
         $target = User::factory()->create();
 
         $this->assertTrue(resolve(UserPolicy::class)->view($admin, $target));
+    }
+
+    #[Test]
+    public function owns_model_hook_fences_a_model_bound_check_despite_the_permission(): void
+    {
+        Permission::findOrCreate('view users', 'web');
+
+        $member = User::factory()->member()->create();
+        $member->givePermissionTo('view users');
+        $other = User::factory()->create();
+
+        $policy = resolve(ScopedUserPolicy::class);
+
+        $this->assertTrue($policy->view($member, $member));
+        $this->assertFalse($policy->view($member, $other));
+    }
+
+    #[Test]
+    public function owns_model_hook_does_not_apply_to_model_less_checks(): void
+    {
+        Permission::findOrCreate('view any users', 'web');
+
+        $member = User::factory()->member()->create();
+        $member->givePermissionTo('view any users');
+
+        $this->assertTrue(resolve(ScopedUserPolicy::class)->viewAny($member));
     }
 }

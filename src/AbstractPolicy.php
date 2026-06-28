@@ -31,7 +31,7 @@ abstract readonly class AbstractPolicy
     /** @param Authenticatable&Authorizable $user */
     public function view(Authenticatable $user, Model $model): bool
     {
-        return $this->userCan($user, Ability::VIEW, $model);
+        return $this->ownsModel($user, $model) && $this->userCan($user, Ability::VIEW, $model);
     }
 
     /** @param Authenticatable&Authorizable $user */
@@ -43,25 +43,36 @@ abstract readonly class AbstractPolicy
     /** @param Authenticatable&Authorizable $user */
     public function update(Authenticatable $user, Model $model): bool
     {
-        return $this->userCan($user, Ability::UPDATE, $model);
+        return $this->ownsModel($user, $model) && $this->userCan($user, Ability::UPDATE, $model);
     }
 
     /** @param Authenticatable&Authorizable $user */
     public function delete(Authenticatable $user, Model $model): bool
     {
-        return $this->userCan($user, Ability::DELETE, $model);
+        return $this->ownsModel($user, $model) && $this->userCan($user, Ability::DELETE, $model);
     }
 
     /** @param Authenticatable&Authorizable $user */
     public function restore(Authenticatable $user, Model $model): bool
     {
-        return $this->userCan($user, Ability::RESTORE, $model);
+        return $this->ownsModel($user, $model) && $this->userCan($user, Ability::RESTORE, $model);
     }
 
     /** @param Authenticatable&Authorizable $user */
     public function forceDelete(Authenticatable $user, Model $model): bool
     {
-        return $this->userCan($user, Ability::FORCE_DELETE, $model);
+        return $this->ownsModel($user, $model) && $this->userCan($user, Ability::FORCE_DELETE, $model);
+    }
+
+    /**
+     * Tenancy / ownership hook for model-bound checks. The default grants access
+     * (no fencing); override to scope a model to the user (e.g. company_id /
+     * team_id match, or a relation walk). Model-less checks (viewAny, create) do
+     * not consult it.
+     */
+    protected function ownsModel(Authenticatable $user, Model $model): bool
+    {
+        return true;
     }
 
     /** @param Authenticatable&Authorizable $user */

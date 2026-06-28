@@ -148,6 +148,33 @@ Scaffold one with the generator:
 php artisan make:authorization-policy Post
 ```
 
+### Ownership / tenancy scoping (`ownsModel()`)
+
+The model-bound methods (`view`, `update`, `delete`, `restore`, `forceDelete`)
+resolve to `ownsModel($user, $model) && userCan(...)`. By default `ownsModel()`
+returns `true` (no fencing). Override it to scope a model to the user — a
+`company_id` / `team_id` match, a relation walk, etc. Model-less checks
+(`viewAny`, `create`) never consult it.
+
+```php
+abstract readonly class CompanyScopedPolicy extends AbstractPolicy
+{
+    protected function ownsModel(Authenticatable $user, Model $model): bool
+    {
+        return $user->company?->id === $this->companyId($model);
+    }
+
+    protected function companyId(Model $model): ?int
+    {
+        return $model->company_id;
+    }
+}
+```
+
+The CRUD methods are not `final`, so a policy that needs different logic (e.g.
+"manage across the tenant OR own it") can override the method directly and call
+`parent::view(...)` for the owns-and-can branch.
+
 ## Abilities and permission names
 
 - `Enums\Ability` — the seven standard resource abilities (1:1 with policy
