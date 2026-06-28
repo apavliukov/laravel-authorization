@@ -16,20 +16,10 @@ declarations wiring them together.
 
 ## Installation
 
-The package is distributed as a private Composer package via VCS.
-
-```jsonc
-// composer.json
-"repositories": [
-    { "type": "vcs", "url": "git@github.com:apavliukov/laravel-authorization.git" }
-],
-"require": {
-    "apavliukov/laravel-authorization": "dev-main"
-}
-```
+The package is published on [Packagist](https://packagist.org/packages/apavliukov/laravel-authorization):
 
 ```bash
-composer require apavliukov/laravel-authorization:dev-main
+composer require apavliukov/laravel-authorization
 ```
 
 Make sure Spatie's permission tables are migrated (publish and run its migrations
