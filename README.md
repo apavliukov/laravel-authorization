@@ -57,10 +57,8 @@ The published provider looks like this:
 
 ```php
 use AlexPavliukov\Authorization\Authorization;
-use AlexPavliukov\Authorization\Enums\SystemAbility;
 use App\Enums\Policies\Role;
 use App\Models\User;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 final class AuthorizationServiceProvider extends ServiceProvider
@@ -73,7 +71,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
             User::class,
         ]);
 
-        Gate::define(SystemAbility::ACCESS_PLATFORM_ADMIN, static fn (): bool => false);
+        // Define your app's system (model-less) abilities here, e.g.:
+        // Gate::define(\App\Enums\SystemAbility::ACCESS_PLATFORM_ADMIN, static fn (): bool => false);
     }
 }
 ```
@@ -153,7 +152,9 @@ php artisan make:authorization-policy Post
 
 - `Enums\Ability` — the seven standard resource abilities (1:1 with policy
   methods). Values are camelCase so Gate routes them straight to policy methods.
-- `Enums\SystemAbility` — standalone `Gate::define()` checks with no model.
+- System abilities (model-less `Gate::define()` checks, e.g. "access platform
+  admin") are **app-defined** — declare your own enum and gates in your provider;
+  the package ships no `SystemAbility` enum.
 - Model-specific abilities are added by overriding `HasPolicy::getCustomAbilities()`:
 
 ```php

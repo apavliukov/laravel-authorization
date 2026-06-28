@@ -13,7 +13,7 @@ namespace AlexPavliukov\Authorization\Enums;
  * PermissionRegistry::nameFromAbility() converts the value to a space-separated DB
  * permission string: VIEW_ANY + users → "view any users".
  *
- * System abilities (singleton Gate checks, no model) live in SystemAbility.
+ * System abilities (model-less Gate checks) are app-defined; the package ships no SystemAbility enum.
  * Model-specific abilities (e.g. UserAbility) extend this set via HasPolicy::getCustomAbilities().
  */
 enum Ability: string

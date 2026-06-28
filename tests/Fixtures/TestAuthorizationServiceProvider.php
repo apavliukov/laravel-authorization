@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Tests\Fixtures;
 
 use AlexPavliukov\Authorization\Authorization;
-use AlexPavliukov\Authorization\Enums\SystemAbility;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
