@@ -53,4 +53,48 @@ final class PermissionSyncTest extends TestCase
         $this->assertSame(7, Permission::query()->count());
         $this->assertSame(count(Role::cases()), SpatieRole::query()->count());
     }
+
+    #[Test]
+    public function plan_lists_creations_and_role_grants_on_a_clean_database(): void
+    {
+        $plan = resolve(PermissionSync::class)->plan();
+
+        $this->assertContains('view any users', $plan['permissions']['create']);
+        $this->assertCount(7, $plan['permissions']['create']);
+        $this->assertSame([], $plan['permissions']['remove']);
+        $this->assertEqualsCanonicalizing(['view users', 'update users'], $plan['roles']['editor']['grant']);
+        $this->assertSame([], $plan['roles']['admin']['grant']);
+    }
+
+    #[Test]
+    public function plan_reports_undeclared_permissions_as_removals(): void
+    {
+        Permission::query()->create(['name' => 'legacy ability', 'guard_name' => 'web']);
+
+        $plan = resolve(PermissionSync::class)->plan();
+
+        $this->assertContains('legacy ability', $plan['permissions']['remove']);
+    }
+
+    #[Test]
+    public function apply_without_prune_keeps_undeclared_permissions(): void
+    {
+        Permission::query()->create(['name' => 'legacy ability', 'guard_name' => 'web']);
+
+        resolve(PermissionSync::class)->apply();
+
+        $this->assertDatabaseHas('permissions', ['name' => 'legacy ability']);
+        $this->assertDatabaseHas('permissions', ['name' => 'view any users']);
+    }
+
+    #[Test]
+    public function apply_with_prune_removes_undeclared_permissions(): void
+    {
+        Permission::query()->create(['name' => 'legacy ability', 'guard_name' => 'web']);
+
+        resolve(PermissionSync::class)->apply(true);
+
+        $this->assertDatabaseMissing('permissions', ['name' => 'legacy ability']);
+        $this->assertDatabaseHas('permissions', ['name' => 'view any users']);
+    }
 }

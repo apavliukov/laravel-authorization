@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization;
 
 use AlexPavliukov\Authorization\Console\MakePolicyCommand;
+use AlexPavliukov\Authorization\Console\SyncCommand;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
 use AlexPavliukov\Authorization\Support\BypassGate;
@@ -33,7 +34,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         }
 
         if ($this->app->runningInConsole()) {
-            $this->commands([MakePolicyCommand::class]);
+            $this->commands([MakePolicyCommand::class, SyncCommand::class]);
 
             $this->publishes([
                 __DIR__.'/stubs/AuthorizationServiceProvider.stub' => app_path('Providers/AuthorizationServiceProvider.php'),

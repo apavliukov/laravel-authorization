@@ -17,7 +17,6 @@ final class AuthorizationSeeder extends Seeder
 
     public function run(): void
     {
-        $this->sync->permissions();
-        $this->sync->roles();
+        $this->sync->apply();
     }
 }
