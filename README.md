@@ -259,6 +259,16 @@ calls `setPermissionsTeamId()`. With teams off, none of this is wired.
 
 Provide a custom resolver with `Authorization::resolveTeamsUsing(YourResolver::class)`.
 
+When the team is derived from session or request-scoped context rather than a
+column on the user, pass a closure instead — it is wrapped in a
+`CallbackTeamResolver` and receives the current `Request`:
+
+```php
+Authorization::resolveTeamsUsing(
+    fn (Request $request): int|string|null => $request->session()->get('current_team_id'),
+);
+```
+
 ## Development
 
 ```bash

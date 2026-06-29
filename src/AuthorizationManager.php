@@ -7,7 +7,10 @@ namespace AlexPavliukov\Authorization;
 use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
+use AlexPavliukov\Authorization\Teams\CallbackTeamResolver;
 use BackedEnum;
+use Closure;
+use Illuminate\Http\Request;
 use RuntimeException;
 
 final class AuthorizationManager
@@ -66,9 +69,13 @@ final class AuthorizationManager
         ));
     }
 
-    /** @param class-string<TeamResolver>|TeamResolver $resolver */
-    public function resolveTeamsUsing(string|TeamResolver $resolver): void
+    /** @param class-string<TeamResolver>|TeamResolver|Closure(Request): (int|string|null) $resolver */
+    public function resolveTeamsUsing(string|TeamResolver|Closure $resolver): void
     {
+        if ($resolver instanceof Closure) {
+            $resolver = new CallbackTeamResolver($resolver);
+        }
+
         $this->bind(TeamResolver::class, $resolver);
     }
 
