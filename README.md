@@ -12,7 +12,7 @@ declarations wiring them together.
 
 - PHP `^8.4`
 - Laravel `^13.0`
-- [`spatie/laravel-permission`](https://spatie.be/docs/laravel-permission) `^7.4`
+- [`spatie/laravel-permission`](https://spatie.be/docs/laravel-permission) `^8.0`
 
 ## Installation
 
@@ -249,6 +249,19 @@ public function run(): void
 }
 ```
 
+The same sync is available as a command. Preview the diff with `--dry-run`, and
+delete permissions the registry no longer declares with `--prune`:
+
+```bash
+php artisan authorization:sync             # create missing permissions + sync role grants
+php artisan authorization:sync --dry-run   # show the create/remove/grant/revoke diff, write nothing
+php artisan authorization:sync --prune     # also delete permissions no longer declared
+```
+
+`--prune` deletes every permission under the guard the registry no longer
+declares — enable it only when permissions are managed solely through this
+package. `PermissionSync::plan()` returns the same diff programmatically.
+
 ## Teams
 
 When Spatie native teams are enabled (`config('permission.teams') === true`), the
@@ -267,6 +280,72 @@ column on the user, pass a closure instead — it is wrapped in a
 Authorization::resolveTeamsUsing(
     fn (Request $request): int|string|null => $request->session()->get('current_team_id'),
 );
+```
+
+### Temporary team context
+
+`Authorization::withTeam()` runs a callback under a given permissions team and
+restores the previous one afterwards — even if the callback throws. Useful for
+acting on another tenant's data without leaking team state:
+
+```php
+Authorization::withTeam($organizationId, fn () => $user->assignRole('organization_admin'));
+```
+
+### Team-aware role reads
+
+Spatie's `hasRole()` and the `role` query scope are bound to the *active* team.
+To ask about role membership in a *specific* team — or globally — without
+switching the active team, add the `HasTeamAwareRoles` trait to the model:
+
+```php
+use AlexPavliukov\Authorization\Concerns\HasTeamAwareRoles;
+
+class User extends Authenticatable
+{
+    use HasRoles;
+    use HasTeamAwareRoles;
+}
+```
+
+```php
+// facade reads
+Authorization::userHasRoleInTeam($user, Role::ORGANIZATION_ADMIN, $organizationId);
+Authorization::userHasGlobalRole($user, Role::PLATFORM_ADMIN);
+
+// query scopes
+User::query()->whereHasRoleInTeam(Role::ORGANIZATION_ADMIN, $organizationId)->get();
+User::query()->whereHasGlobalRole(Role::PLATFORM_ADMIN)->get();
+```
+
+A **global role** is one assigned with a `NULL` pivot `team_id` — effective when
+no team is active (e.g. a platform-level admin). Storing it requires a **nullable**
+`model_has_roles.team_id`: Spatie's stock teams migration makes that column
+`NOT NULL` and part of the primary key, so to use global assignments make it
+nullable and replace the primary key with a unique index that includes `team_id`.
+
+## Testing
+
+`Testing\InteractsWithAuthorization` ships team-aware test primitives so your
+suite does not re-implement the Spatie teams plumbing:
+
+```php
+use AlexPavliukov\Authorization\Testing\InteractsWithAuthorization;
+
+final class ExampleTest extends TestCase
+{
+    use InteractsWithAuthorization;
+
+    public function test_example(): void
+    {
+        $this->assignRoleInTeam($member, Role::ORGANIZATION_ADMIN, $organizationId);
+        $this->assignRoleInTeam($admin, Role::PLATFORM_ADMIN, null); // global assignment
+
+        $roleId = $this->roleModelId(Role::ORGANIZATION_ADMIN);
+        $this->withPermissionsTeam($organizationId, fn () => /* act within the team */);
+        $this->resetPermissionsTeam();
+    }
+}
 ```
 
 ## Development
