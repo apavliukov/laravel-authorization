@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Tests\Fixtures;
 
 use AlexPavliukov\Authorization\Concerns\HasPolicy;
+use AlexPavliukov\Authorization\Concerns\HasTeamAwareRoles;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -17,6 +18,7 @@ class User extends Authenticatable
 
     use HasPolicy;
     use HasRoles;
+    use HasTeamAwareRoles;
 
     protected $guarded = [];
 

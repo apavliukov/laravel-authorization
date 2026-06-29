@@ -20,6 +20,8 @@ abstract class TestCase extends Orchestra
     {
         parent::setUp();
 
+        setPermissionsTeamId(null);
+
         foreach (Role::cases() as $role) {
             SpatieRole::findOrCreate($role->value, 'web');
         }

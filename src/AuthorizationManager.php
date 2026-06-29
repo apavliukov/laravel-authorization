@@ -7,9 +7,12 @@ namespace AlexPavliukov\Authorization;
 use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
+use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
 use AlexPavliukov\Authorization\Teams\CallbackTeamResolver;
 use BackedEnum;
 use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use RuntimeException;
 
@@ -82,6 +85,58 @@ final class AuthorizationManager
     public function teamResolver(): TeamResolver
     {
         return resolve(TeamResolver::class);
+    }
+
+    /**
+     * Run a callback under a temporary permissions team, restoring the previous
+     * team afterwards — even if the callback throws.
+     *
+     * @template TReturn
+     *
+     * @param  callable():TReturn  $callback
+     * @return TReturn
+     */
+    public function withTeam(int|string|null $teamId, callable $callback): mixed
+    {
+        $previousTeamId = getPermissionsTeamId();
+        setPermissionsTeamId($teamId);
+
+        try {
+            return $callback();
+        } finally {
+            setPermissionsTeamId($previousTeamId);
+        }
+    }
+
+    /**
+     * Whether the user holds the role as a global assignment (`team_id IS NULL`),
+     * independent of the active permissions team.
+     */
+    public function userHasGlobalRole(Authenticatable $user, BackedEnum|string $role): bool
+    {
+        if (! $user instanceof Model) {
+            return false;
+        }
+
+        return $this->teamAwareRoles()->userHasRole($user, ModelHasRolesQuery::roleName($role), null, true);
+    }
+
+    /**
+     * Whether the user holds the role assigned within the given team, independent
+     * of the active permissions team.
+     */
+    public function userHasRoleInTeam(Authenticatable $user, BackedEnum|string $role, int|string $teamId): bool
+    {
+        if (! $user instanceof Model) {
+            return false;
+        }
+
+        return $this->teamAwareRoles()->userHasRole($user, ModelHasRolesQuery::roleName($role), $teamId, false);
+    }
+
+    private function teamAwareRoles(): ModelHasRolesQuery
+    {
+        return resolve(ModelHasRolesQuery::class);
     }
 
     /**

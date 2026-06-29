@@ -7,6 +7,8 @@ namespace AlexPavliukov\Authorization;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
 use BackedEnum;
+use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Facade;
 
 /**
@@ -15,8 +17,11 @@ use Illuminate\Support\Facades\Facade;
  * @method static void authorizableModels(string[] $models)
  * @method static string[] models()
  * @method static BackedEnum[] superAdminRoles()
- * @method static void resolveTeamsUsing(string|TeamResolver $resolver)
+ * @method static void resolveTeamsUsing(string|TeamResolver|Closure $resolver)
  * @method static TeamResolver teamResolver()
+ * @method static mixed withTeam(int|string|null $teamId, callable $callback)
+ * @method static bool userHasGlobalRole(Authenticatable $user, BackedEnum|string $role)
+ * @method static bool userHasRoleInTeam(Authenticatable $user, BackedEnum|string $role, int|string $teamId)
  * @method static void bypassUsing(string|BypassStrategy $strategy)
  *
  * @see AuthorizationManager

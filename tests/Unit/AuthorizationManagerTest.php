@@ -53,4 +53,36 @@ final class AuthorizationManagerTest extends TestCase
 
         $this->assertSame([Role::ADMIN], $manager->superAdminRoles());
     }
+
+    #[Test]
+    public function with_team_runs_the_callback_under_the_team_and_restores_the_previous(): void
+    {
+        setPermissionsTeamId(3);
+        $manager = new AuthorizationManager;
+
+        $teamInside = $manager->withTeam(7, static fn (): int|string|null => getPermissionsTeamId());
+
+        $this->assertSame(7, $teamInside);
+        $this->assertSame(3, getPermissionsTeamId());
+
+        setPermissionsTeamId(null);
+    }
+
+    #[Test]
+    public function with_team_restores_the_previous_team_when_the_callback_throws(): void
+    {
+        setPermissionsTeamId(3);
+        $manager = new AuthorizationManager;
+
+        try {
+            $manager->withTeam(7, static function (): void {
+                throw new RuntimeException('boom');
+            });
+        } catch (RuntimeException) {
+        }
+
+        $this->assertSame(3, getPermissionsTeamId());
+
+        setPermissionsTeamId(null);
+    }
 }
