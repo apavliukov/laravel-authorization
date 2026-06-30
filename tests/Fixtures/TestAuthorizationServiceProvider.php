@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Tests\Fixtures;
 
 use AlexPavliukov\Authorization\Authorization;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -22,6 +21,6 @@ final class TestAuthorizationServiceProvider extends ServiceProvider
             User::class,
         ]);
 
-        Gate::define(SystemAbility::ACCESS_PLATFORM_ADMIN, static fn (): bool => false);
+        Authorization::systemAbilities(SystemAbility::class);
     }
 }

@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static void forgetUserRoles(Authenticatable $user)
  * @method static void resolveTenantUsing(Closure $resolver)
  * @method static void tenantColumn(string $column)
+ * @method static void systemAbilities(string $enum)
  * @method static void bypassUsing(string|BypassStrategy $strategy)
  *
  * @see AuthorizationManager

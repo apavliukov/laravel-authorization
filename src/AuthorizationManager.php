@@ -15,6 +15,7 @@ use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use RuntimeException;
 
 final class AuthorizationManager
@@ -227,6 +228,21 @@ final class AuthorizationManager
     public function tenantColumnName(): string
     {
         return $this->tenantColumn;
+    }
+
+    /**
+     * Register a deny-by-default gate for each case of an app system-ability enum,
+     * so only the super-admin bypass grants them. The app keeps the enum; the
+     * package wires the gates. Use for bypass-only platform gates; if a non-super
+     * role must hold a system ability, define that gate yourself instead.
+     *
+     * @param  class-string<BackedEnum>  $enum
+     */
+    public function systemAbilities(string $enum): void
+    {
+        foreach ($enum::cases() as $case) {
+            Gate::define((string) $case->value, static fn (): bool => false);
+        }
     }
 
     /**
