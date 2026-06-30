@@ -37,7 +37,7 @@ final readonly class PermissionRegistry
      * @param  class-string  $modelClass
      * @return array<int, string>
      */
-    private function permissionsFor(string $modelClass): array
+    public function permissionsFor(string $modelClass): array
     {
         $abilities = array_merge(
             $modelClass::getBasicAbilities(),
