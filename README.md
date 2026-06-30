@@ -175,13 +175,54 @@ The CRUD methods are not `final`, so a policy that needs different logic (e.g.
 "manage across the tenant OR own it") can override the method directly and call
 `parent::view(...)` for the owns-and-can branch.
 
+### Attribute tenancy (`TenantScopedPolicy`)
+
+For the common case — a model fenced to the current user's tenant by an owning
+column — extend `TenantScopedPolicy` instead of hand-writing `ownsModel()`. Declare
+once how to read the tenant from the user and the default owning column:
+
+```php
+// in your AuthorizationServiceProvider::boot()
+Authorization::resolveTenantUsing(static fn (User $user): ?int => $user->company?->id);
+Authorization::tenantColumn('company_id'); // default owning column (defaults to tenant_id)
+```
+
+```php
+use AlexPavliukov\Authorization\TenantScopedPolicy;
+
+// Reached by the default column — only getModelClass() needed:
+final readonly class LocationPolicy extends TenantScopedPolicy
+{
+    protected function getModelClass(): string { return Location::class; }
+}
+
+// Reached through a relation — override tenantKey():
+final readonly class ReviewPolicy extends TenantScopedPolicy
+{
+    protected function getModelClass(): string { return Review::class; }
+
+    protected function tenantKey(Model $model): int|string|null
+    {
+        return $model->location?->company_id;
+    }
+}
+```
+
+The resolver closure may type-hint your concrete user model (`User $user`), so
+scoped policies never touch `$user` and need no type narrowing.
+
 ## Abilities and permission names
 
 - `Enums\Ability` — the seven standard resource abilities (1:1 with policy
   methods). Values are camelCase so Gate routes them straight to policy methods.
 - System abilities (model-less `Gate::define()` checks, e.g. "access platform
-  admin") are **app-defined** — declare your own enum and gates in your provider;
-  the package ships no `SystemAbility` enum.
+  admin") are **app-defined** — declare your own enum; the package ships no
+  `SystemAbility` enum. Register deny-by-default gates for it in one call (only the
+  super-admin bypass then grants them), and check with `@can(Ability::X->value)`:
+
+  ```php
+  Authorization::systemAbilities(\App\Enums\SystemAbility::class);
+  ```
 - Model-specific abilities are added by overriding `HasPolicy::getCustomAbilities()`:
 
 ```php
@@ -193,6 +234,38 @@ public static function getCustomAbilities(): array
 
 `PermissionRegistry` converts an ability + model into a permission string, e.g.
 `Ability::VIEW_ANY` + `User` → `"view any users"`.
+
+### Building a role's permission set
+
+`AuthorizationRole::permissions()` returns permission-name strings. Build them
+fluently with `Permissions` instead of hand-assembling through the registry:
+
+```php
+use AlexPavliukov\Authorization\Support\Permissions;
+
+public function permissions(): array
+{
+    return match ($this) {
+        self::SUPER_ADMIN => [],                 // bypass covers it
+        self::OWNER => Permissions::make()
+            ->for(Company::class)->only(Ability::VIEW, Ability::UPDATE)
+            ->forAll(Location::class, Form::class, Review::class)
+            ->all(),
+    };
+}
+```
+
+### Primary role for routing
+
+`Authorization::primaryRole($user)` returns the highest-priority role the user
+holds — the first matching case in the enum's declaration order — using
+team-agnostic identity, so it suits login redirects and "home" links regardless of
+the active team:
+
+```php
+$role = Authorization::primaryRole($user) ?? Role::default();
+return $role->landingUrl(); // landingUrl() is your app's business method
+```
 
 ## Admin bypass
 

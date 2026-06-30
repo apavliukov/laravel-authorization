@@ -12,7 +12,7 @@ resolve against the specific project** (don't guess these).
 > package**, not to bend the package to the app's existing (possibly divergent)
 > shape.
 
-- **Composer:** `apavliukov/laravel-authorization` (`^0.6`)
+- **Composer:** `apavliukov/laravel-authorization` (`^0.7`)
 - **Namespace:** `AlexPavliukov\Authorization\`
 - **Requires:** PHP `^8.4`, Laravel `^13`, `spatie/laravel-permission ^8.0`
 
@@ -65,16 +65,18 @@ Ability (package enum)  the 7 CRUD verbs (camelCase = policy method names)
 SystemAbility (APP enum)  model-less gates — the package ships none
 
 AuthorizationManager (singleton)  holds: role enum class + authorizable models
-Authorization (facade)            useRoleEnum / authorizableModels / bypassUsing / resolveTeamsUsing
-                                  withTeam / userHasGlobalRole / userHasRoleInTeam / userHasRole / userRolesInTeam / forgetUserRoles
+Authorization (facade)            useRoleEnum / authorizableModels / bypassUsing / resolveTeamsUsing / resolveTenantUsing / tenantColumn / systemAbilities
+                                  withTeam / userHasGlobalRole / userHasRoleInTeam / userHasRole / userRolesInTeam / primaryRole / forgetUserRoles
 
 PermissionRegistry   ability + model → "{ability words} {table}"  (e.g. "view any users")
+Support\Permissions  fluent builder for AuthorizationRole::permissions() (for/only/forAll/all)
 AbstractPolicy       view/update/delete/restore/forceDelete = ownsModel() && userCan()
                      viewAny/create = userCan()    ownsModel() default true (override to scope)
+TenantScopedPolicy   ownsModel() = current tenant === model's owning key (attribute tenancy)
 BypassGate + BypassStrategy   one Gate::before; RoleBypass (default) | NoBypass | your own
 PermissionSync + AuthorizationSeeder   plan()/apply(prune) + idempotent seeding; authorization:sync command
 Teams (optional)     DefaultTeamResolver | CallbackTeamResolver + SetPermissionsTeam middleware (only when teams on)
-Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam (memoized, request-scoped) + HasTeamAwareRoles query scopes
+Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam / primaryRole (memoized, request-scoped) + HasTeamAwareRoles query scopes
 Testing\InteractsWithAuthorization   test primitives (assignRoleInTeam / withPermissionsTeam / roleModelId / resetPermissionsTeam)
 make:authorization-policy {Model}    scaffolds a policy
 ```
@@ -108,6 +110,10 @@ Resolution order for any `can()` / `authorize()` / `@can`:
 | `Database\PermissionSync` | service | `plan()` (diff) / `apply(bool $prune)`; backs `AuthorizationSeeder` |
 | `authorization:sync` | command | sync permissions/role grants; `--dry-run` preview, `--prune` deletes undeclared permissions |
 | `Testing\InteractsWithAuthorization` | trait | test primitives for team-aware role state |
+| `TenantScopedPolicy` | abstract | attribute-tenancy base; `resolveTenantUsing()` + `tenantColumn()` declare tenant + owning column, override `tenantKey()` for relations |
+| `Support\Permissions` | builder | fluent `make()->for()->only()->forAll()->all()` for `AuthorizationRole::permissions()` |
+| `primaryRole()` (facade) | facade | highest-priority role the user holds (enum declaration order), for routing |
+| `systemAbilities()` (facade) | facade | register deny-by-default gates for an app system-ability enum |
 | `make:authorization-policy {Model}` | command | scaffolds a policy |
 
 The core `AuthorizationServiceProvider` is **auto-discovered**. It binds the
@@ -185,22 +191,34 @@ Adapt to the project; the order is a guide, not a script.
 
 ## 5. Recipes
 
-**Tenancy by attribute (no Spatie teams)** — e.g. `company_id`. Make an app base:
+**Tenancy by attribute (no Spatie teams)** — e.g. `company_id`. Extend the
+package's `TenantScopedPolicy`; declare the tenant source and owning column once:
 
 ```php
-abstract readonly class CompanyScopedPolicy extends AbstractPolicy
-{
-    protected function ownsModel(Authenticatable $user, Model $model): bool
-    {
-        return $user->company?->id === $this->companyId($model);
-    }
+// in the published AuthorizationServiceProvider::boot()
+Authorization::resolveTenantUsing(static fn (User $user): ?int => $user->company?->id);
+Authorization::tenantColumn('company_id');   // default owning column (defaults to tenant_id)
 
-    protected function companyId(Model $model): ?int
+// most policies: just the model
+final readonly class LocationPolicy extends TenantScopedPolicy
+{
+    protected function getModelClass(): string { return Location::class; }
+}
+
+// relation-walked model: override tenantKey()
+final readonly class ReviewPolicy extends TenantScopedPolicy
+{
+    protected function getModelClass(): string { return Review::class; }
+
+    protected function tenantKey(Model $model): int|string|null
     {
-        return $model->company_id; // override per policy when reached via a relation
+        return $model->location?->company_id;
     }
 }
 ```
+
+The resolver closure may type-hint the concrete user model, so scoped policies
+never touch `$user` and need no `/** @var User */` narrowing.
 
 **Tenancy with Spatie teams** — turn teams on; role/permission assignments become
 team-scoped automatically (set the team id per request via `SetPermissionsTeam`,
@@ -215,6 +233,32 @@ public function view(Authenticatable $user, Model $model): bool
 {
     return $user->can('manage_across_tenant things') || parent::view($user, $model);
 }
+```
+
+**Role permission set** — build `AuthorizationRole::permissions()` with the
+`Permissions` fluent builder instead of hand-assembling through the registry:
+
+```php
+self::OWNER => Permissions::make()
+    ->for(Company::class)->only(Ability::VIEW, Ability::UPDATE)
+    ->forAll(Location::class, Form::class, Review::class)
+    ->all(),
+```
+
+**System (model-less) abilities** — keep the app's enum; register deny-by-default
+gates in one call (only the super-admin bypass grants them), check with `@can`:
+
+```php
+Authorization::systemAbilities(SystemAbility::class);   // gates wired; use @can(SystemAbility::X->value)
+```
+
+**Primary role for routing** — replace a hand-rolled "highest-priority role" loop
+with `Authorization::primaryRole($user)` (first held case in enum declaration
+order, team-agnostic); the landing/priority stay on the enum:
+
+```php
+$role = Authorization::primaryRole($user) ?? Role::default();
+return $role->landingUrl();
 ```
 
 **Custom (non-CRUD) ability** — app enum + expose on the model + a new policy
