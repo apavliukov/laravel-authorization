@@ -8,6 +8,7 @@ use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
 use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
+use AlexPavliukov\Authorization\Support\ScalarKey;
 use AlexPavliukov\Authorization\Support\TeamScope;
 use AlexPavliukov\Authorization\Teams\CallbackTeamResolver;
 use BackedEnum;
@@ -232,9 +233,7 @@ final class AuthorizationManager
             throw new RuntimeException('Tenant resolver is not configured. Call Authorization::resolveTenantUsing() in AuthorizationServiceProvider.');
         }
 
-        $tenant = ($this->tenantResolver)($user);
-
-        return is_int($tenant) || is_string($tenant) ? $tenant : null;
+        return ScalarKey::normalize(($this->tenantResolver)($user));
     }
 
     /** Set the default owning column TenantScopedPolicy reads (default: `tenant_id`). */

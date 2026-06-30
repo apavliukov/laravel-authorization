@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization;
 
+use AlexPavliukov\Authorization\Support\ScalarKey;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -25,8 +26,6 @@ abstract readonly class TenantScopedPolicy extends AbstractPolicy
 
     protected function tenantKey(Model $model): int|string|null
     {
-        $value = $model->getAttribute(resolve(AuthorizationManager::class)->tenantColumnName());
-
-        return is_int($value) || is_string($value) ? $value : null;
+        return ScalarKey::normalize($model->getAttribute(resolve(AuthorizationManager::class)->tenantColumnName()));
     }
 }

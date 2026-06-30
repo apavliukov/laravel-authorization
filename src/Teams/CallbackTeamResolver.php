@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Teams;
 
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
+use AlexPavliukov\Authorization\Support\ScalarKey;
 use Closure;
 use Illuminate\Http\Request;
 
@@ -15,8 +16,6 @@ final readonly class CallbackTeamResolver implements TeamResolver
 
     public function resolve(Request $request): int|string|null
     {
-        $teamId = ($this->callback)($request);
-
-        return is_int($teamId) || is_string($teamId) ? $teamId : null;
+        return ScalarKey::normalize(($this->callback)($request));
     }
 }

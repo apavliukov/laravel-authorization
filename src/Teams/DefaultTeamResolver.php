@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Teams;
 
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
+use AlexPavliukov\Authorization\Support\ScalarKey;
 use Illuminate\Http\Request;
 
 final class DefaultTeamResolver implements TeamResolver
@@ -13,8 +14,7 @@ final class DefaultTeamResolver implements TeamResolver
     {
         $configValue = config('permission.team_foreign_key', 'team_id');
         $foreignKey = is_string($configValue) ? $configValue : 'team_id';
-        $teamId = $request->user()?->getAttribute($foreignKey);
 
-        return is_int($teamId) || is_string($teamId) ? $teamId : null;
+        return ScalarKey::normalize($request->user()?->getAttribute($foreignKey));
     }
 }
