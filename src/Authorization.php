@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization;
 
+use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
 use BackedEnum;
@@ -24,6 +25,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool userHasRoleInTeam(Authenticatable $user, BackedEnum|string $role, int|string $teamId)
  * @method static bool userHasRole(Authenticatable $user, BackedEnum|string $role)
  * @method static list<string> userRolesInTeam(Authenticatable $user, int|string|null $teamId)
+ * @method static (AuthorizationRole&BackedEnum)|null primaryRole(Authenticatable $user)
  * @method static void forgetUserRoles(Authenticatable $user)
  * @method static void resolveTenantUsing(Closure $resolver)
  * @method static void tenantColumn(string $column)
