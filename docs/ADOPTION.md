@@ -12,7 +12,7 @@ resolve against the specific project** (don't guess these).
 > package**, not to bend the package to the app's existing (possibly divergent)
 > shape.
 
-- **Composer:** `apavliukov/laravel-authorization` (`^0.3`)
+- **Composer:** `apavliukov/laravel-authorization` (`^0.6`)
 - **Namespace:** `AlexPavliukov\Authorization\`
 - **Requires:** PHP `^8.4`, Laravel `^13`, `spatie/laravel-permission ^8.0`
 
@@ -28,13 +28,22 @@ decide each one explicitly before refactoring:
 2. **Spatie teams: on or off?** Teams = `config('permission.teams')`. Turn it on
    only if you need **team-scoped role/permission assignments** (the same user
    holding different permissions per tenant). Otherwise keep it off and scope in
-   policies.
+   policies. **If you also have platform-level (global) roles under teams** (a role
+   effective regardless of tenant, e.g. a platform admin), they are assigned with a
+   `NULL` pivot `team_id` — but Spatie's stock teams migration makes
+   `model_has_roles.team_id` `NOT NULL` and part of the primary key. To store global
+   assignments, make that column **nullable** and replace the primary key with a
+   unique index that includes `team_id`.
 3. **Are roles stored anywhere other than Spatie?** (e.g. a `*_user.role_id`
    pivot.) If yes, decide: **migrate them into Spatie roles/teams** so they fit the
    package, or keep a custom resolver *outside* the package (the package then only
    provides `AbstractPolicy` + `ownsModel()` and you keep your own `Gate::before`).
    Prefer migrating — it's the whole point of unifying.
 4. **Which role(s) are super-admin?** (`AuthorizationRole::isSuperAdmin()` → true.)
+   **Under teams**, the default `RoleBypass` is team-scoped: a super-admin assigned
+   globally (`team_id IS NULL`) bypasses only when no team is active (platform
+   context); inside a team they get their team-scoped rights, not god-mode. Decide
+   whether that "god-mode only in platform context" behaviour is what you want.
 5. **Bypass policy:** default `RoleBypass` (super-admins bypass everything)? Any
    abilities that must always go through policies even for super-admins
    (`protected`)? Or no god-mode at all (`NoBypass`)?
@@ -57,13 +66,16 @@ SystemAbility (APP enum)  model-less gates — the package ships none
 
 AuthorizationManager (singleton)  holds: role enum class + authorizable models
 Authorization (facade)            useRoleEnum / authorizableModels / bypassUsing / resolveTeamsUsing
+                                  withTeam / userHasGlobalRole / userHasRoleInTeam / userHasRole / userRolesInTeam / forgetUserRoles
 
 PermissionRegistry   ability + model → "{ability words} {table}"  (e.g. "view any users")
 AbstractPolicy       view/update/delete/restore/forceDelete = ownsModel() && userCan()
                      viewAny/create = userCan()    ownsModel() default true (override to scope)
 BypassGate + BypassStrategy   one Gate::before; RoleBypass (default) | NoBypass | your own
-PermissionSync + AuthorizationSeeder   idempotent seeding of permissions + role grants
-Teams (optional)     DefaultTeamResolver + SetPermissionsTeam middleware (only when teams on)
+PermissionSync + AuthorizationSeeder   plan()/apply(prune) + idempotent seeding; authorization:sync command
+Teams (optional)     DefaultTeamResolver | CallbackTeamResolver + SetPermissionsTeam middleware (only when teams on)
+Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam (memoized, request-scoped) + HasTeamAwareRoles query scopes
+Testing\InteractsWithAuthorization   test primitives (assignRoleInTeam / withPermissionsTeam / roleModelId / resetPermissionsTeam)
 make:authorization-policy {Model}    scaffolds a policy
 ```
 
@@ -89,7 +101,13 @@ Resolution order for any `can()` / `authorize()` / `@can`:
 | `PermissionRegistry` | service | `nameFromAbility()`, `allPermissions()` (rarely called directly) |
 | `Support\RoleBypass` / `NoBypass` | strategies | default / no-god-mode bypass |
 | `Database\AuthorizationSeeder` | seeder | call from the app's seeder |
-| `Teams\DefaultTeamResolver` / `SetPermissionsTeam` | teams | used only when teams are on |
+| `Teams\DefaultTeamResolver` / `CallbackTeamResolver` / `SetPermissionsTeam` | teams | used only when teams are on; `CallbackTeamResolver` resolves the team from a closure (session/request context) |
+| team-aware reads (facade) | facade | `userHasGlobalRole()`, `userHasRoleInTeam()`, `userHasRole()` (any team), `userRolesInTeam()`, `forgetUserRoles()` — memoized per request |
+| `Concerns\HasTeamAwareRoles` | trait | query scopes `whereHasGlobalRole` / `whereHasRoleInTeam` / `whereHasRole` |
+| `withTeam()` (facade) | facade | run a callback under a temporary permissions team, restoring the previous one |
+| `Database\PermissionSync` | service | `plan()` (diff) / `apply(bool $prune)`; backs `AuthorizationSeeder` |
+| `authorization:sync` | command | sync permissions/role grants; `--dry-run` preview, `--prune` deletes undeclared permissions |
+| `Testing\InteractsWithAuthorization` | trait | test primitives for team-aware role state |
 | `make:authorization-policy {Model}` | command | scaffolds a policy |
 
 The core `AuthorizationServiceProvider` is **auto-discovered**. It binds the
@@ -156,7 +174,9 @@ Adapt to the project; the order is a guide, not a script.
    Apply tenancy and custom abilities via the recipes in §5.
 8. **Seeding**: replace the app's permission/role seeders with a call to
    `AuthorizationSeeder` from `DatabaseSeeder`/consistency seeder
-   (`$this->call([AuthorizationSeeder::class])`). Delete the old ones.
+   (`$this->call([AuthorizationSeeder::class])`). Delete the old ones. For
+   on-demand syncing replace any bespoke sync command with `authorization:sync`
+   (`--dry-run` / `--prune`).
 9. **Bypass**: default is `RoleBypass`. Switch with `Authorization::bypassUsing(...)`
    in the provider if the project needs `NoBypass` or `protected` abilities.
 10. **Run the app's test suite** and fix fallout. Re-seed.
@@ -217,6 +237,57 @@ public function publish(Authenticatable $user, Model $model): bool
 strategy receives `(Authenticatable $user, string $ability)` — **no model**, by
 design (model-scoped logic belongs in policies, not the bypass).
 
+**Team-aware role reads (teams on)** — ask about role membership in a *specific*
+team, *any* team, or globally, **without** switching the active team — replacing
+hand-written `model_has_roles` queries. Add `Concerns\HasTeamAwareRoles` to the
+model for the query scopes:
+
+```php
+Authorization::userHasGlobalRole($user, Role::PLATFORM_ADMIN);   // team_id IS NULL
+Authorization::userHasRoleInTeam($user, Role::ORG_ADMIN, $teamId);
+Authorization::userHasRole($user, Role::ORG_ADMIN);              // in any team
+Authorization::userRolesInTeam($user, $teamId);                 // list<string> of role names (null = global)
+
+User::query()->whereHasGlobalRole(Role::PLATFORM_ADMIN)->get();
+User::query()->whereHasRoleInTeam(Role::ORG_ADMIN, $teamId)->get();
+User::query()->whereHasRole(Role::ORG_ADMIN)->get();
+```
+
+These reads are **memoized per request** (the service is bound `scoped`, so the
+memo flushes on each Octane request / queue job; keyed by model identity, so it
+never leaks across users). After mutating a user's roles and reading them again in
+the same request, call `Authorization::forgetUserRoles($user)`. For a UI that
+works in terms of a Spatie `role_id`, bridge it to a name at the boundary
+(`Role::findById($id)->name`) and use the name-based reads — the package keeps a
+single name/enum identity axis.
+
+**Temporary team context** — run a callback under a given team, restoring the
+previous one (even on throw):
+
+```php
+Authorization::withTeam($teamId, fn () => $user->assignRole($role));
+```
+
+**Session / closure team resolution** — when the tenant comes from session or
+request context rather than a column on the user, pass a closure (wrapped in
+`CallbackTeamResolver`); return `null` for "no team" (e.g. a platform admin):
+
+```php
+Authorization::resolveTeamsUsing(
+    fn (Request $request): int|string|null => $request->session()->get('current_team_id'),
+);
+```
+
+**Permission sync / prune** — seed idempotently via `AuthorizationSeeder`, or run
+the `authorization:sync` command: `--dry-run` previews the create/remove +
+grant/revoke diff, `--prune` deletes permissions the registry no longer declares
+(opt-in; only when permissions are managed solely through the package).
+`PermissionSync::plan()` returns the same diff programmatically.
+
+**Testing** — `use Testing\InteractsWithAuthorization` for team-aware test
+primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
+`resetPermissionsTeam()`) instead of re-implementing the Spatie plumbing.
+
 ---
 
 ## 6. Anti-patterns to remove during the refactor
@@ -230,6 +301,11 @@ design (model-scoped logic belongs in policies, not the bypass).
 - Hand-built permission strings → always `PermissionRegistry::nameFromAbility()`.
 - Re-implementing CRUD policy methods just to add an ownership check → use
   `ownsModel()`.
+- Hand-written `model_has_roles` queries / `setPermissionsTeamId()` juggling to read
+  a role in another team → use the team-aware reads (`userHasRoleInTeam` /
+  `userRolesInTeam` / `whereHasRole*`) and `withTeam()`.
+- A bespoke per-request memo on the user model for a role check → the team-aware
+  reads are already memoized; use `forgetUserRoles()` to invalidate.
 
 ---
 
