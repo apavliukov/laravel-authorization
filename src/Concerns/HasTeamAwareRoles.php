@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Concerns;
 
 use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
+use AlexPavliukov\Authorization\Support\TeamScope;
 use BackedEnum;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -22,7 +23,7 @@ trait HasTeamAwareRoles
     public function scopeWhereHasGlobalRole(Builder $query, BackedEnum|string $role): Builder
     {
         resolve(ModelHasRolesQuery::class)
-            ->applyScope($query, ModelHasRolesQuery::roleName($role), null, true);
+            ->applyScope($query, ModelHasRolesQuery::roleName($role), TeamScope::Global);
 
         return $query;
     }
@@ -34,7 +35,19 @@ trait HasTeamAwareRoles
     public function scopeWhereHasRoleInTeam(Builder $query, BackedEnum|string $role, int|string $teamId): Builder
     {
         resolve(ModelHasRolesQuery::class)
-            ->applyScope($query, ModelHasRolesQuery::roleName($role), $teamId, false);
+            ->applyScope($query, ModelHasRolesQuery::roleName($role), TeamScope::Team, $teamId);
+
+        return $query;
+    }
+
+    /**
+     * @param  Builder<Model>  $query
+     * @return Builder<Model>
+     */
+    public function scopeWhereHasRole(Builder $query, BackedEnum|string $role): Builder
+    {
+        resolve(ModelHasRolesQuery::class)
+            ->applyScope($query, ModelHasRolesQuery::roleName($role), TeamScope::Any);
 
         return $query;
     }

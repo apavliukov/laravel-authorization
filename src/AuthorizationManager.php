@@ -8,6 +8,7 @@ use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
 use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
+use AlexPavliukov\Authorization\Support\TeamScope;
 use AlexPavliukov\Authorization\Teams\CallbackTeamResolver;
 use BackedEnum;
 use Closure;
@@ -118,7 +119,7 @@ final class AuthorizationManager
             return false;
         }
 
-        return $this->teamAwareRoles()->userHasRole($user, ModelHasRolesQuery::roleName($role), null, true);
+        return $this->teamAwareRoles()->userHasRole($user, ModelHasRolesQuery::roleName($role), TeamScope::Global);
     }
 
     /**
@@ -131,7 +132,35 @@ final class AuthorizationManager
             return false;
         }
 
-        return $this->teamAwareRoles()->userHasRole($user, ModelHasRolesQuery::roleName($role), $teamId, false);
+        return $this->teamAwareRoles()->userHasRole($user, ModelHasRolesQuery::roleName($role), TeamScope::Team, $teamId);
+    }
+
+    /**
+     * Whether the user holds the role in any team (or globally), independent of
+     * the active permissions team.
+     */
+    public function userHasRole(Authenticatable $user, BackedEnum|string $role): bool
+    {
+        if (! $user instanceof Model) {
+            return false;
+        }
+
+        return $this->teamAwareRoles()->userHasRole($user, ModelHasRolesQuery::roleName($role), TeamScope::Any);
+    }
+
+    /**
+     * The names of the roles the user holds in the given team (or globally when
+     * $teamId is null), independent of the active permissions team.
+     *
+     * @return list<string>
+     */
+    public function userRolesInTeam(Authenticatable $user, int|string|null $teamId): array
+    {
+        if (! $user instanceof Model) {
+            return [];
+        }
+
+        return $this->teamAwareRoles()->rolesInTeam($user, $teamId);
     }
 
     private function teamAwareRoles(): ModelHasRolesQuery

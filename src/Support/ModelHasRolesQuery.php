@@ -22,42 +22,71 @@ final class ModelHasRolesQuery
     }
 
     /**
-     * Whether the user holds the named role as a global assignment
-     * (`team_id IS NULL`) or within a specific team.
+     * Whether the user holds the named role under the given team scope: globally
+     * (`team_id IS NULL`), within a specific team, or in any team.
      */
-    public function userHasRole(Model $user, string $roleName, int|string|null $teamId, bool $global): bool
+    public function userHasRole(Model $user, string $roleName, TeamScope $scope, int|string|null $teamId = null): bool
     {
         $query = $user->getConnection()->table($this->pivotTable());
         $query->where($this->morphKey(), $user->getKey())
             ->where('model_type', $user->getMorphClass());
 
-        $this->constrain($query, $roleName, $teamId, $global);
+        $this->constrain($query, $roleName, $scope, $teamId);
 
         return $query->exists();
     }
 
     /**
-     * Keep only models holding the named role globally or within the given team,
-     * via a correlated EXISTS subquery — leaves the active team untouched.
+     * Keep only models holding the named role under the given team scope, via a
+     * correlated EXISTS subquery — leaves the active team untouched.
      *
      * @param  EloquentBuilder<Model>  $query
      */
-    public function applyScope(EloquentBuilder $query, string $roleName, int|string|null $teamId, bool $global): void
+    public function applyScope(EloquentBuilder $query, string $roleName, TeamScope $scope, int|string|null $teamId = null): void
     {
         $model = $query->getModel();
         $pivotTable = $this->pivotTable();
         $qualifiedMorphKey = $pivotTable.'.'.$this->morphKey();
 
-        $query->whereExists(function (QueryBuilder $subQuery) use ($model, $pivotTable, $qualifiedMorphKey, $roleName, $teamId, $global): void {
+        $query->whereExists(function (QueryBuilder $subQuery) use ($model, $pivotTable, $qualifiedMorphKey, $roleName, $scope, $teamId): void {
             $subQuery->from($pivotTable)
                 ->whereColumn($qualifiedMorphKey, $model->getQualifiedKeyName())
                 ->where('model_type', $model->getMorphClass());
 
-            $this->constrain($subQuery, $roleName, $teamId, $global);
+            $this->constrain($subQuery, $roleName, $scope, $teamId);
         });
     }
 
-    private function constrain(QueryBuilder $query, string $roleName, int|string|null $teamId, bool $global): void
+    /**
+     * The names of the roles the user holds in the given team (or globally when
+     * $teamId is null).
+     *
+     * @return list<string>
+     */
+    public function rolesInTeam(Model $user, int|string|null $teamId): array
+    {
+        $pivotTable = $this->pivotTable();
+        $rolesTable = $this->rolesTable();
+
+        $query = $user->getConnection()->table($pivotTable)
+            ->join($rolesTable, $rolesTable.'.id', '=', $pivotTable.'.'.$this->roleKey())
+            ->where($pivotTable.'.'.$this->morphKey(), $user->getKey())
+            ->where($pivotTable.'.model_type', $user->getMorphClass())
+            ->where($rolesTable.'.guard_name', $this->guard());
+
+        if ($teamId === null) {
+            $query->whereNull($pivotTable.'.'.$this->teamKey());
+        } else {
+            $query->where($pivotTable.'.'.$this->teamKey(), $teamId);
+        }
+
+        /** @var list<string> $names */
+        $names = $query->pluck($rolesTable.'.name')->all();
+
+        return $names;
+    }
+
+    private function constrain(QueryBuilder $query, string $roleName, TeamScope $scope, int|string|null $teamId): void
     {
         $query->whereIn($this->roleKey(), function (QueryBuilder $roles) use ($roleName): void {
             $roles->select('id')
@@ -66,13 +95,11 @@ final class ModelHasRolesQuery
                 ->where('guard_name', $this->guard());
         });
 
-        if ($global) {
+        if ($scope === TeamScope::Global) {
             $query->whereNull($this->teamKey());
-
-            return;
+        } elseif ($scope === TeamScope::Team) {
+            $query->where($this->teamKey(), $teamId);
         }
-
-        $query->where($this->teamKey(), $teamId);
     }
 
     private function pivotTable(): string

@@ -22,6 +22,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static mixed withTeam(int|string|null $teamId, callable $callback)
  * @method static bool userHasGlobalRole(Authenticatable $user, BackedEnum|string $role)
  * @method static bool userHasRoleInTeam(Authenticatable $user, BackedEnum|string $role, int|string $teamId)
+ * @method static bool userHasRole(Authenticatable $user, BackedEnum|string $role)
+ * @method static list<string> userRolesInTeam(Authenticatable $user, int|string|null $teamId)
  * @method static void bypassUsing(string|BypassStrategy $strategy)
  *
  * @see AuthorizationManager

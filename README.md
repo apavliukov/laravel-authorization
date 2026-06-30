@@ -312,10 +312,13 @@ class User extends Authenticatable
 // facade reads
 Authorization::userHasRoleInTeam($user, Role::ORGANIZATION_ADMIN, $organizationId);
 Authorization::userHasGlobalRole($user, Role::PLATFORM_ADMIN);
+Authorization::userHasRole($user, Role::ORGANIZATION_ADMIN);          // in any team (or global)
+Authorization::userRolesInTeam($user, $organizationId);              // ['organization_admin', ...] (null = global)
 
 // query scopes
 User::query()->whereHasRoleInTeam(Role::ORGANIZATION_ADMIN, $organizationId)->get();
 User::query()->whereHasGlobalRole(Role::PLATFORM_ADMIN)->get();
+User::query()->whereHasRole(Role::ORGANIZATION_ADMIN)->get();         // holds it in any team
 ```
 
 A **global role** is one assigned with a `NULL` pivot `team_id` — effective when

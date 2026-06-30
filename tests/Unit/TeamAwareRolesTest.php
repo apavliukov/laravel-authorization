@@ -72,6 +72,48 @@ final class TeamAwareRolesTest extends TeamsTestCase
         $this->assertSame([$inTeam->getKey()], $ids);
     }
 
+    #[Test]
+    public function it_detects_a_role_held_in_any_team(): void
+    {
+        $user = $this->createUser('any-team@example.test');
+        $without = $this->createUser('without@example.test');
+        Authorization::withTeam(7, static fn (): mixed => $user->assignRole(Role::EDITOR->value));
+
+        $manager = resolve(AuthorizationManager::class);
+
+        $this->assertTrue($manager->userHasRole($user, Role::EDITOR));
+        $this->assertFalse($manager->userHasRole($without, Role::EDITOR));
+    }
+
+    #[Test]
+    public function scope_filters_users_holding_a_role_in_any_team(): void
+    {
+        $inTeam5 = $this->createUser('team5@example.test');
+        $inTeam9 = $this->createUser('team9@example.test');
+        $this->createUser('roleless@example.test');
+        Authorization::withTeam(5, static fn (): mixed => $inTeam5->assignRole(Role::EDITOR->value));
+        Authorization::withTeam(9, static fn (): mixed => $inTeam9->assignRole(Role::EDITOR->value));
+
+        $ids = User::query()->whereHasRole(Role::EDITOR)->pluck('id')->all();
+
+        $this->assertEqualsCanonicalizing([$inTeam5->getKey(), $inTeam9->getKey()], $ids);
+    }
+
+    #[Test]
+    public function it_lists_the_roles_a_user_holds_in_a_team(): void
+    {
+        $user = $this->createUser('roles-in-team@example.test');
+        Authorization::withTeam(5, static function () use ($user): void {
+            $user->assignRole(Role::EDITOR->value);
+            $user->assignRole(Role::MEMBER->value);
+        });
+
+        $manager = resolve(AuthorizationManager::class);
+
+        $this->assertEqualsCanonicalizing(['editor', 'member'], $manager->userRolesInTeam($user, 5));
+        $this->assertSame([], $manager->userRolesInTeam($user, 9));
+    }
+
     private function createUser(string $email): User
     {
         return User::query()->create([
