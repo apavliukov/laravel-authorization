@@ -25,6 +25,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool userHasRole(Authenticatable $user, BackedEnum|string $role)
  * @method static list<string> userRolesInTeam(Authenticatable $user, int|string|null $teamId)
  * @method static void forgetUserRoles(Authenticatable $user)
+ * @method static void resolveTenantUsing(Closure $resolver)
+ * @method static void tenantColumn(string $column)
  * @method static void bypassUsing(string|BypassStrategy $strategy)
  *
  * @see AuthorizationManager

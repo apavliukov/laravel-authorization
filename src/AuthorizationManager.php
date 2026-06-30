@@ -28,6 +28,10 @@ final class AuthorizationManager
     /** @var array<int, AuthorizationRole&BackedEnum>|null */
     private ?array $superAdminRoles = null;
 
+    private ?Closure $tenantResolver = null;
+
+    private string $tenantColumn = 'tenant_id';
+
     /** @param class-string<AuthorizationRole&BackedEnum> $roleEnum */
     public function useRoleEnum(string $roleEnum): void
     {
@@ -190,6 +194,39 @@ final class AuthorizationManager
     public function bypassUsing(string|BypassStrategy $strategy): void
     {
         $this->bind(BypassStrategy::class, $strategy);
+    }
+
+    /**
+     * Declare how to read the current tenant id from the authenticated user — the
+     * closure receives the authenticated user and returns its tenant id (or null).
+     * `TenantScopedPolicy` uses it to fence models to the user's tenant. Typing the
+     * closure's parameter as the app's concrete user model is fine and encouraged.
+     */
+    public function resolveTenantUsing(Closure $resolver): void
+    {
+        $this->tenantResolver = $resolver;
+    }
+
+    public function currentTenant(Authenticatable $user): int|string|null
+    {
+        if ($this->tenantResolver === null) {
+            throw new RuntimeException('Tenant resolver is not configured. Call Authorization::resolveTenantUsing() in AuthorizationServiceProvider.');
+        }
+
+        $tenant = ($this->tenantResolver)($user);
+
+        return is_int($tenant) || is_string($tenant) ? $tenant : null;
+    }
+
+    /** Set the default owning column TenantScopedPolicy reads (default: `tenant_id`). */
+    public function tenantColumn(string $column): void
+    {
+        $this->tenantColumn = $column;
+    }
+
+    public function tenantColumnName(): string
+    {
+        return $this->tenantColumn;
     }
 
     /**
