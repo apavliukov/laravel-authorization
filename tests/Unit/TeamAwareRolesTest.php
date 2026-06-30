@@ -11,6 +11,7 @@ use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TeamsTestCase;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -112,6 +113,25 @@ final class TeamAwareRolesTest extends TeamsTestCase
 
         $this->assertEqualsCanonicalizing(['editor', 'member'], $manager->userRolesInTeam($user, 5));
         $this->assertSame([], $manager->userRolesInTeam($user, 9));
+    }
+
+    #[Test]
+    public function reads_are_memoized_per_request_and_dropped_by_forget(): void
+    {
+        $user = $this->createUser('cached@example.test');
+        Authorization::withTeam(null, static fn (): mixed => $user->assignRole(Role::ADMIN->value));
+
+        $manager = resolve(AuthorizationManager::class);
+
+        $this->assertTrue($manager->userHasGlobalRole($user, Role::ADMIN));
+
+        // Remove the assignment behind the package's back: the memoized read stays true.
+        DB::table('model_has_roles')->delete();
+        $this->assertTrue($manager->userHasGlobalRole($user, Role::ADMIN));
+
+        // After forgetting, the read reflects the database again.
+        $manager->forgetUserRoles($user);
+        $this->assertFalse($manager->userHasGlobalRole($user, Role::ADMIN));
     }
 
     private function createUser(string $email): User

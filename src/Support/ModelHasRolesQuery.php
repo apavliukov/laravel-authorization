@@ -16,6 +16,17 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
  */
 final class ModelHasRolesQuery
 {
+    /**
+     * Request-scoped memo (the service is bound `scoped`, so it is flushed per
+     * request / queue job). Keyed by model identity + query shape.
+     *
+     * @var array<string, bool>
+     */
+    private array $hasCache = [];
+
+    /** @var array<string, list<string>> */
+    private array $rolesCache = [];
+
     public static function roleName(BackedEnum|string $role): string
     {
         return $role instanceof BackedEnum ? (string) $role->value : $role;
@@ -26,6 +37,13 @@ final class ModelHasRolesQuery
      * (`team_id IS NULL`), within a specific team, or in any team.
      */
     public function userHasRole(Model $user, string $roleName, TeamScope $scope, int|string|null $teamId = null): bool
+    {
+        $key = $this->cacheKey($user).'|has|'.$roleName.'|'.$scope->name.'|'.($teamId ?? 'null');
+
+        return $this->hasCache[$key] ??= $this->queryUserHasRole($user, $roleName, $scope, $teamId);
+    }
+
+    private function queryUserHasRole(Model $user, string $roleName, TeamScope $scope, int|string|null $teamId): bool
     {
         $query = $user->getConnection()->table($this->pivotTable());
         $query->where($this->morphKey(), $user->getKey())
@@ -65,6 +83,35 @@ final class ModelHasRolesQuery
      */
     public function rolesInTeam(Model $user, int|string|null $teamId): array
     {
+        $key = $this->cacheKey($user).'|roles|'.($teamId ?? 'null');
+
+        return $this->rolesCache[$key] ??= $this->queryRolesInTeam($user, $teamId);
+    }
+
+    /**
+     * Drop the memoized reads for a single user — call after mutating that user's
+     * roles within the same request, before reading them again.
+     */
+    public function forget(Model $user): void
+    {
+        $prefix = $this->cacheKey($user).'|';
+
+        foreach (array_keys($this->hasCache) as $key) {
+            if (str_starts_with($key, $prefix)) {
+                unset($this->hasCache[$key]);
+            }
+        }
+
+        foreach (array_keys($this->rolesCache) as $key) {
+            if (str_starts_with($key, $prefix)) {
+                unset($this->rolesCache[$key]);
+            }
+        }
+    }
+
+    /** @return list<string> */
+    private function queryRolesInTeam(Model $user, int|string|null $teamId): array
+    {
         $pivotTable = $this->pivotTable();
         $rolesTable = $this->rolesTable();
 
@@ -84,6 +131,13 @@ final class ModelHasRolesQuery
         $names = $query->pluck($rolesTable.'.name')->all();
 
         return $names;
+    }
+
+    private function cacheKey(Model $user): string
+    {
+        $key = $user->getKey();
+
+        return $user->getMorphClass().'|'.(is_scalar($key) ? (string) $key : '');
     }
 
     private function constrain(QueryBuilder $query, string $roleName, TeamScope $scope, int|string|null $teamId): void

@@ -9,6 +9,7 @@ use AlexPavliukov\Authorization\Console\SyncCommand;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
 use AlexPavliukov\Authorization\Support\BypassGate;
+use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
 use AlexPavliukov\Authorization\Support\RoleBypass;
 use AlexPavliukov\Authorization\Teams\DefaultTeamResolver;
 use AlexPavliukov\Authorization\Teams\SetPermissionsTeam;
@@ -20,6 +21,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(AuthorizationManager::class);
+        $this->app->scoped(ModelHasRolesQuery::class);
         $this->app->bind(TeamResolver::class, DefaultTeamResolver::class);
         $this->app->singleton(BypassStrategy::class, RoleBypass::class);
     }

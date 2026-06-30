@@ -327,6 +327,16 @@ no team is active (e.g. a platform-level admin). Storing it requires a **nullabl
 `NOT NULL` and part of the primary key, so to use global assignments make it
 nullable and replace the primary key with a unique index that includes `team_id`.
 
+These reads are **memoized per request** (the underlying service is bound
+`scoped`, so the memo is flushed on each Octane request / queue job). The cache is
+keyed by model identity, so it never leaks across users. If you mutate a user's
+roles and read them again within the same request, drop the memo first:
+
+```php
+$user->assignRole($role);
+Authorization::forgetUserRoles($user);
+```
+
 ## Testing
 
 `Testing\InteractsWithAuthorization` ships team-aware test primitives so your

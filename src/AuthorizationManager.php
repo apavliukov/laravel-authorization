@@ -163,6 +163,19 @@ final class AuthorizationManager
         return $this->teamAwareRoles()->rolesInTeam($user, $teamId);
     }
 
+    /**
+     * Drop the request-scoped memo of a user's team-aware role reads — call after
+     * mutating that user's roles within the same request, before reading again.
+     */
+    public function forgetUserRoles(Authenticatable $user): void
+    {
+        if (! $user instanceof Model) {
+            return;
+        }
+
+        $this->teamAwareRoles()->forget($user);
+    }
+
     private function teamAwareRoles(): ModelHasRolesQuery
     {
         return resolve(ModelHasRolesQuery::class);
