@@ -44,11 +44,9 @@ final readonly class PermissionSync
                 'guard_name' => $this->guardName(),
             ]);
 
-            $rolePermissions = $role->permissions();
-
-            if ($rolePermissions !== []) {
-                $spatieRole->syncPermissions($rolePermissions);
-            }
+            // syncPermissions is authoritative: an empty set detaches every
+            // permission, which is exactly what a deny-all role declares.
+            $spatieRole->syncPermissions($role->permissions());
         }
     }
 
@@ -74,9 +72,11 @@ final readonly class PermissionSync
 
     /**
      * Create missing permissions, optionally prune permissions no longer declared
-     * by the registry, then sync each role's grants. Pruning is opt-in: enable it
-     * only when permissions are managed solely through this package — it deletes
-     * every permission under the guard that the registry no longer declares.
+     * by the registry, then set each role's permissions to exactly its
+     * `permissions()` declaration (an empty declaration detaches all — deny-all).
+     * Pruning is opt-in: enable it only when permissions are managed solely through
+     * this package — it deletes every permission under the guard the registry no
+     * longer declares.
      */
     public function apply(bool $prune = false): void
     {
