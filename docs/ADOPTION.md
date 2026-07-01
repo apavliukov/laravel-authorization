@@ -76,7 +76,7 @@ TenantScopedPolicy   ownsModel() = current tenant === model's owning key (attrib
 BypassGate + BypassStrategy   one Gate::before; RoleBypass (default) | NoBypass | your own
 PermissionSync + AuthorizationSeeder   plan()/apply(prune) + idempotent seeding; authorization:sync command
 Teams (optional)     DefaultTeamResolver | CallbackTeamResolver + SetPermissionsTeam middleware (only when teams on)
-Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam / primaryRole (memoized, request-scoped) + HasTeamAwareRoles query scopes
+Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam / primaryRole / userCan (memoized, request-scoped) + HasTeamAwareRoles query scopes
 Testing\InteractsWithAuthorization   test primitives (assignRoleInTeam / withPermissionsTeam / roleModelId / resetPermissionsTeam)
 make:authorization-policy {Model}    scaffolds a policy
 ```
@@ -105,6 +105,7 @@ Resolution order for any `can()` / `authorize()` / `@can`:
 | `Database\AuthorizationSeeder` | seeder | call from the app's seeder |
 | `Teams\DefaultTeamResolver` / `CallbackTeamResolver` / `SetPermissionsTeam` | teams | used only when teams are on; `CallbackTeamResolver` resolves the team from a closure (session/request context) |
 | team-aware reads (facade) | facade | `userHasGlobalRole()`, `userHasRoleInTeam()`, `userHasRole()` (any team), `userRolesInTeam()`, `forgetUserRoles()` — memoized per request |
+| `userCan()` (facade) | facade | permission check memoized per request by `(user, permission, active team)`; policies route through it; `forgetUserPermissions()` invalidates |
 | `Concerns\HasTeamAwareRoles` | trait | query scopes `whereHasGlobalRole` / `whereHasRoleInTeam` / `whereHasRole` |
 | `withTeam()` (facade) | facade | run a callback under a temporary permissions team, restoring the previous one |
 | `Database\PermissionSync` | service | `plan()` (diff) / `apply(bool $prune)`; backs `AuthorizationSeeder` |
@@ -305,6 +306,16 @@ works in terms of a Spatie `role_id`, bridge it to a name at the boundary
 (`Role::findById($id)->name`) and use the name-based reads — the package keeps a
 single name/enum identity axis.
 
+**Memoized permission checks** — `Authorization::userCan($user, $permission[, $model])`
+answers a permission check and memoizes the verdict per request, keyed by
+`(user, permission, active team)`, alongside the role reads above. It wraps
+`$user->can()` (bypass + policies still apply) and is what `AbstractPolicy::userCan()`
+routes through, so every policy check is memoized for free — the win lands when an
+auth-aware query scope repeats the same check on every query. Flush after a
+mid-request grant with `forgetUserPermissions($user)` (or `forgetUserRoles()` after a
+role change, which flushes it too). Replaces a bespoke per-request `can()` memo on
+the user model.
+
 **Temporary team context** — run a callback under a given team, restoring the
 previous one (even on throw):
 
@@ -350,6 +361,9 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
   `userRolesInTeam` / `whereHasRole*`) and `withTeam()`.
 - A bespoke per-request memo on the user model for a role check → the team-aware
   reads are already memoized; use `forgetUserRoles()` to invalidate.
+- A bespoke per-request memo on the user model for a `can()` check (e.g. an
+  auth-aware query scope) → use `userCan()`; policies already route through it.
+  Invalidate with `forgetUserPermissions()` (or `forgetUserRoles()`).
 
 ---
 

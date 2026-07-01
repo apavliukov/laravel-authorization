@@ -14,8 +14,10 @@ abstract readonly class AbstractPolicy
 {
     protected string $modelClass;
 
-    public function __construct(private PermissionRegistry $registry)
-    {
+    public function __construct(
+        private PermissionRegistry $registry,
+        private AuthorizationManager $manager,
+    ) {
         $this->modelClass = $this->getModelClass();
     }
 
@@ -80,6 +82,6 @@ abstract readonly class AbstractPolicy
     {
         $modelToCheck = $model ?? $this->modelClass;
 
-        return $user->can($this->registry->nameFromAbility($ability, $modelToCheck));
+        return $this->manager->userCan($user, $this->registry->nameFromAbility($ability, $modelToCheck));
     }
 }

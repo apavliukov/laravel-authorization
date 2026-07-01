@@ -410,6 +410,32 @@ $user->assignRole($role);
 Authorization::forgetUserRoles($user);
 ```
 
+### Memoized permission checks
+
+`Authorization::userCan()` answers a permission check and memoizes the verdict for
+the request, keyed by `(user identity, permission, active permissions team)`. It
+sits beside the role reads above and shares their lifecycle (bound `scoped`, so the
+memo is flushed on each Octane request / queue job, and never leaks across users or
+teams). It wraps `$user->can()`, so the `Gate::before` bypass and any policies still
+apply — the memo just avoids re-running the whole Gate pipeline for a check whose
+answer is stable within the request. This pays off when an auth-aware query scope
+issues the same check on every query:
+
+```php
+Authorization::userCan($user, 'view any users');                 // permission name
+Authorization::userCan($user, Ability::VIEW, $model);            // (ability, model) pair
+```
+
+`AbstractPolicy::userCan()` routes through it, so every policy check is memoized for
+free. The memo assumes the verdict is a pure function of `(user, permission, active
+team)` for the request; after granting or revoking mid-request, drop it first —
+`forgetUserRoles()` also flushes it, since a role change alters effective permissions:
+
+```php
+$user->givePermissionTo($permission);
+Authorization::forgetUserPermissions($user);   // or forgetUserRoles() after a role change
+```
+
 ## Testing
 
 `Testing\InteractsWithAuthorization` ships team-aware test primitives so your

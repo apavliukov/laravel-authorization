@@ -10,6 +10,7 @@ use AlexPavliukov\Authorization\Contracts\TeamResolver;
 use BackedEnum;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Facade;
 
 /**
@@ -26,7 +27,9 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool userHasRole(Authenticatable $user, BackedEnum|string $role)
  * @method static list<string> userRolesInTeam(Authenticatable $user, int|string|null $teamId)
  * @method static (AuthorizationRole&BackedEnum)|null primaryRole(Authenticatable $user)
+ * @method static bool userCan(Authenticatable $user, BackedEnum|string $permission, Model|string|null $model = null)
  * @method static void forgetUserRoles(Authenticatable $user)
+ * @method static void forgetUserPermissions(Authenticatable $user)
  * @method static void resolveTenantUsing(Closure $resolver)
  * @method static void tenantColumn(string $column)
  * @method static void systemAbilities(string $enum)

@@ -10,9 +10,11 @@ use AlexPavliukov\Authorization\Contracts\TeamResolver;
 use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
 use AlexPavliukov\Authorization\Support\ScalarKey;
 use AlexPavliukov\Authorization\Support\TeamScope;
+use AlexPavliukov\Authorization\Support\UserPermissionMemo;
 use AlexPavliukov\Authorization\Teams\CallbackTeamResolver;
 use BackedEnum;
 use Closure;
+use Illuminate\Contracts\Auth\Access\Authorizable;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -172,6 +174,8 @@ final class AuthorizationManager
     /**
      * Drop the request-scoped memo of a user's team-aware role reads — call after
      * mutating that user's roles within the same request, before reading again.
+     * A role change alters effective permissions, so this also flushes the user's
+     * memoized permission verdicts.
      */
     public function forgetUserRoles(Authenticatable $user): void
     {
@@ -180,6 +184,62 @@ final class AuthorizationManager
         }
 
         $this->teamAwareRoles()->forget($user);
+        $this->teamAwarePermissions()->forget($user);
+    }
+
+    /**
+     * Whether the user is granted the permission, memoized per request for the
+     * triple (user, permission, active permissions team). Accepts a permission
+     * name directly, or an (ability, model) pair resolved via PermissionRegistry.
+     *
+     * Wraps `$user->can()`, so Gate::before bypass and policies still apply. The
+     * memo assumes the verdict is a pure function of (user, permission, active
+     * team) within the request; after mutating grants mid-request, flush via
+     * forgetUserPermissions() (or forgetUserRoles() for role changes).
+     *
+     * @param  Authenticatable&Authorizable  $user
+     */
+    public function userCan(Authenticatable $user, BackedEnum|string $permission, Model|string|null $model = null): bool
+    {
+        $permissionName = $this->permissionName($permission, $model);
+
+        if (! $user instanceof Model) {
+            return $user->can($permissionName);
+        }
+
+        return $this->teamAwarePermissions()->remember(
+            $user,
+            $permissionName,
+            ScalarKey::normalize(getPermissionsTeamId()),
+            static fn (): bool => $user->can($permissionName),
+        );
+    }
+
+    /**
+     * Drop the request-scoped memo of a user's permission verdicts — call after
+     * granting or revoking that user's permissions within the same request, before
+     * reading again. Role mutations are covered by forgetUserRoles().
+     */
+    public function forgetUserPermissions(Authenticatable $user): void
+    {
+        if (! $user instanceof Model) {
+            return;
+        }
+
+        $this->teamAwarePermissions()->forget($user);
+    }
+
+    private function permissionName(BackedEnum|string $permission, Model|string|null $model): string
+    {
+        if (! $permission instanceof BackedEnum) {
+            return $permission;
+        }
+
+        if ($model === null) {
+            throw new RuntimeException('A model instance or class-string is required to resolve a permission name from an ability enum.');
+        }
+
+        return resolve(PermissionRegistry::class)->nameFromAbility($permission, $model);
     }
 
     /**
@@ -203,6 +263,11 @@ final class AuthorizationManager
     private function teamAwareRoles(): ModelHasRolesQuery
     {
         return resolve(ModelHasRolesQuery::class);
+    }
+
+    private function teamAwarePermissions(): UserPermissionMemo
+    {
+        return resolve(UserPermissionMemo::class);
     }
 
     /**
