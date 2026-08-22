@@ -178,11 +178,13 @@ The CRUD methods are not `final`, so a policy that needs different logic (e.g.
 ### Attribute tenancy (`TenantScopedPolicy`)
 
 For the common case — a model fenced to the current user's tenant by an owning
-column — extend `TenantScopedPolicy` instead of hand-writing `ownsModel()`. Declare
-once how to read the tenant from the user and the default owning column:
+column — extend `TenantScopedPolicy` instead of hand-writing `ownsModel()`. With
+the [tenancy layer](#tenancy) configured it reads `CurrentTenant` and
+`tenancy.foreign_key` — nothing to declare. Without it, declare once how to read
+the tenant from the user and the default owning column:
 
 ```php
-// in your AuthorizationServiceProvider::boot()
+// in your AuthorizationServiceProvider::boot() — only when tenancy.model is NOT set
 Authorization::resolveTenantUsing(static fn (User $user): ?int => $user->company?->id);
 Authorization::tenantColumn('company_id'); // default owning column (defaults to tenant_id)
 ```
@@ -293,6 +295,10 @@ container lazily on each check.
   Authorization::bypassUsing(\AlexPavliukov\Authorization\Support\NoBypass::class);
   ```
 
+With Spatie teams on, `RoleBypass` reads the **global** assignment
+(`team_id IS NULL`) regardless of the active team: a platform admin keeps bypassing
+inside a tenant, and a tenant-scoped copy of a super-admin role never bypasses.
+
 You can also override the strategy by rebinding the contract in the container:
 
 ```php
@@ -335,13 +341,175 @@ php artisan authorization:sync --prune     # also delete permissions no longer d
 declares — enable it only when permissions are managed solely through this
 package. `PermissionSync::plan()` returns the same diff programmatically.
 
+## Tenancy
+
+One tenancy layer, switched on by config. Publish it with
+`artisan vendor:publish --tag=authorization-config` and set the model:
+
+```php
+// config/authorization.php
+'tenancy' => [
+    'model' => App\Models\Organization::class,   // null = no tenancy
+    'foreign_key' => 'organization_id',
+    'resolver' => 'user',        // 'user' | 'session'
+    'user_column' => 'organization_id',
+    'session_key' => 'current_organization_id',
+    'strict' => env('APP_ENV') !== 'production',
+    'missing_tenant_redirect' => null,            // route name, e.g. 'organizations.pick'
+],
+```
+
+The tenant **is** the Spatie team: turn `permission.teams` on and make
+`model_has_roles.team_id` nullable (see [Teams](#teams)). The app owns the tenant
+model; the package needs nothing from it beyond a primary key.
+
+Two resolution modes, one code path:
+
+- **`user`** — one tenant per user, read from `user_column`.
+- **`session`** — the user belongs to many tenants; the active one lives in
+  `session_key` and is honoured only while the user holds a role in that team. A
+  global super-admin may enter any tenant (the "pin an organization for the
+  platform admin" flow needs no workaround).
+
+### Wiring the middleware
+
+The package registers **no** middleware on any group — a push from a provider is
+silently dropped once the app configures its own groups. Declare it in
+`bootstrap/app.php`:
+
+```php
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->web(append: [SetCurrentTenant::class]);
+    $middleware->api(append: [SetCurrentTenant::class]);   // if the API is tenant-aware
+})
+```
+
+The package only fixes its priority (before `SubstituteBindings`, so bindings are
+fenced). The middleware sets `CurrentTenant` + `setPermissionsTeamId()`.
+
+**Livewire:** `/livewire/update` replays only *persistent* middleware. When
+Livewire is installed the package registers `SetCurrentTenant`,
+`EnsureTenantSelected` and `EnsurePlatformArea` as persistent; without that a
+platform component's actions would run unbypassed. If you register your own
+persistent list, include these three.
+
+**`config:cache`:** `tenancy.strict` reads `env()` — publish the config (or set
+`strict` to a literal) in apps that cache configuration.
+
+### Roles live inside the tenant
+
+With tenancy on, Spatie answers `hasRole()` / `can()` against the **active team**.
+So every tenant-level role (owner, member, editor …) must be assigned *within* the
+tenant — `TenantMembership::add($user, $tenant, Role::OWNER)` — even in `user`
+mode where each user has exactly one tenant. A role assigned globally
+(`team_id IS NULL`) is invisible while a tenant is active; only super-admin roles
+belong there (`assignRoleInTeam($user, Role::PLATFORM_ADMIN, null)`). Seeders and
+registration flows that call `$user->assignRole()` directly must run inside
+`Tenancy::forTenant()` or use `TenantMembership`.
+
+### Tenant-owned models
+
+```php
+use AlexPavliukov\Authorization\Tenancy\BelongsToTenant;
+
+final class Post extends Model
+{
+    use BelongsToTenant;   // global scope + autofill on create + tenant() relation
+}
+
+// Reaches the tenant through another model:
+final class Comment extends Model
+{
+    use BelongsToTenant;
+
+    protected static function tenantRelationPath(): ?string
+    {
+        return 'post';     // or 'campaign.position'
+    }
+}
+```
+
+The scope is **fail-closed**: no current tenant and no bypass ⇒ no rows, and a
+`MissingTenantContextException` when `strict` is on. Creating with no tenant and no
+explicit key always throws, bypass or not — a bypass never produces orphans.
+`forTenant()` suspends an outer bypass, so a platform admin reading "as" a tenant
+sees only that tenant. Cross-tenant route bindings
+404. `TenantScopedPolicy` reads the same `CurrentTenant` (no `resolveTenantUsing()`
+needed) and stays as defence-in-depth.
+
+### Bypass and switching
+
+```php
+use AlexPavliukov\Authorization\Tenancy\Tenancy;
+
+Tenancy::id();  Tenancy::get();  Tenancy::set($organization);  Tenancy::forget();
+Tenancy::withoutTenant(fn () => Post::query()->count());     // all tenants
+Tenancy::forTenant($other, fn () => Post::query()->get());   // another tenant
+```
+
+Never call `withoutGlobalScope(TenantScope::class)` at call sites — the bypass is
+the one named API, and it is what `EnsurePlatformArea` uses.
+
+### Middleware
+
+- `SetCurrentTenant` — resolve + activate (wire it yourself, see above).
+- `EnsureTenantSelected` — 403, or redirect to `missing_tenant_redirect`.
+- `EnsurePlatformArea` — `Gate::authorize('accessPlatformAdmin')` (a deny-all gate
+  the package registers; only the super-admin bypass grants it), then enters the
+  tenant bypass for the rest of the request (entered, not wrapped — Livewire's
+  replay pipeline returns before the component action runs).
+
+### Queues
+
+The tenant id and bypass flag live in Laravel's hidden `Context`, so they ride
+along with every queued job automatically; the worker re-applies the Spatie team
+when the context is hydrated. A job dispatched inside `withoutTenant()` runs
+bypassed.
+
+### Membership
+
+`Tenancy\TenantMembership` is the Spatie plumbing for "user X has role R in tenant T":
+
+```php
+$membership->add($user, $organization, Role::MEMBER);
+$membership->changeRole($user, $organization, Role::ADMIN);
+$membership->remove($user, $organization);
+$membership->roleFor($user, $organization);   // ?string
+$membership->isMember($user, $organization);
+```
+
+Writes run under the target team, restore the active one, and flush the memoized
+role reads.
+
+### Areas
+
+`Tenancy\CurrentArea` answers "which UI area" (`platform | organization | member …`)
+by matching the route name against the `Str::is` patterns in
+`config('authorization.areas')` (default `*platform.*` etc., so `admin.platform.x`
+matches), falling back to a session view mode (`set()`) and then the first
+configured area. Off-request (console, queue) there is no route, so the fallback
+applies. It knows nothing about the tenant — that split is deliberate.
+
+### Testing
+
+```php
+use AlexPavliukov\Authorization\Testing\InteractsWithTenancy;
+
+$this->actingAsInTenant($user, $organization, Role::MEMBER);
+$this->withoutTenant(fn () => Post::factory()->count(3)->create());
+$this->forTenant($other, fn () => /* … */);
+$this->assertFailsClosed(Post::class);   // the per-model fail-closed contract
+```
+
 ## Teams
 
-When Spatie native teams are enabled (`config('permission.teams') === true`), the
-core provider registers `SetPermissionsTeam` on the `web` middleware group. It
-resolves the current team id via the bound `TeamResolver` (default:
-`DefaultTeamResolver`, which reads the user's `team_foreign_key` attribute) and
-calls `setPermissionsTeamId()`. With teams off, none of this is wired.
+When Spatie native teams are enabled (`config('permission.teams') === true`)
+without the tenancy layer, wire `SetPermissionsTeam` yourself in `bootstrap/app.php`
+(`$middleware->web(append: [SetPermissionsTeam::class])`) — the package registers no
+group middleware. It resolves the current team id via the bound `TeamResolver`
+(default: `DefaultTeamResolver`, which reads the user's `team_foreign_key`
+attribute) and calls `setPermissionsTeamId()`. With tenancy on, `SetCurrentTenant`
+replaces it.
 
 Provide a custom resolver with `Authorization::resolveTeamsUsing(YourResolver::class)`.
 

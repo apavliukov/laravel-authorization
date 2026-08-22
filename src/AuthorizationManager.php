@@ -12,6 +12,7 @@ use AlexPavliukov\Authorization\Support\ScalarKey;
 use AlexPavliukov\Authorization\Support\TeamScope;
 use AlexPavliukov\Authorization\Support\UserPermissionMemo;
 use AlexPavliukov\Authorization\Teams\CallbackTeamResolver;
+use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use BackedEnum;
 use Closure;
 use Illuminate\Contracts\Auth\Access\Authorizable;
@@ -34,7 +35,7 @@ final class AuthorizationManager
 
     private ?Closure $tenantResolver = null;
 
-    private string $tenantColumn = 'tenant_id';
+    private ?string $tenantColumn = null;
 
     /** @param class-string<AuthorizationRole&BackedEnum> $roleEnum */
     public function useRoleEnum(string $roleEnum): void
@@ -128,6 +129,18 @@ final class AuthorizationManager
         }
 
         return $this->teamAwareRoles()->userHasRole($user, ModelHasRolesQuery::roleName($role), TeamScope::Global);
+    }
+
+    /**
+     * Whether the user holds a super-admin role as a GLOBAL assignment
+     * (`team_id IS NULL`) — team-agnostic identity, the basis of the bypass.
+     */
+    public function isGlobalSuperAdmin(Authenticatable $user): bool
+    {
+        return array_any(
+            $this->superAdminRoles(),
+            fn (BackedEnum $role): bool => $this->userHasGlobalRole($user, $role),
+        );
     }
 
     /**
@@ -284,6 +297,8 @@ final class AuthorizationManager
     /**
      * Declare how to read the current tenant id from the authenticated user — the
      * closure receives the authenticated user and returns its tenant id (or null).
+     * Unnecessary once `authorization.tenancy.model` is set: the policy then reads
+     * CurrentTenant, and the owning column defaults to `tenancy.foreign_key`.
      * `TenantScopedPolicy` uses it to fence models to the user's tenant. Typing the
      * closure's parameter as the app's concrete user model is fine and encouraged.
      */
@@ -294,6 +309,10 @@ final class AuthorizationManager
 
     public function currentTenant(Authenticatable $user): int|string|null
     {
+        if ($this->tenantResolver === null && resolve(CurrentTenant::class)->isConfigured()) {
+            return resolve(CurrentTenant::class)->id();
+        }
+
         if ($this->tenantResolver === null) {
             throw new RuntimeException('Tenant resolver is not configured. Call Authorization::resolveTenantUsing() in AuthorizationServiceProvider.');
         }
@@ -309,6 +328,12 @@ final class AuthorizationManager
 
     public function tenantColumnName(): string
     {
+        if ($this->tenantColumn === null) {
+            $tenant = resolve(CurrentTenant::class);
+
+            return $tenant->isConfigured() ? $tenant->foreignKey() : 'tenant_id';
+        }
+
         return $this->tenantColumn;
     }
 

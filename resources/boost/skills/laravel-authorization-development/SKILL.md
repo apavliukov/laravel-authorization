@@ -39,8 +39,8 @@ Resolution order for any `can()` / `cannot()`:
 
 ## App Wiring — `AuthorizationServiceProvider`
 
-The package auto-registers (discovery) the bypass, the teams middleware (behind Spatie's
-flag), and `make:authorization-policy`. The app provider only declares specifics:
+The package auto-registers (discovery) the bypass and `make:authorization-policy`;
+middleware is wired by the app in `bootstrap/app.php`. The app provider only declares specifics:
 
 ```php
 public function boot(): void
@@ -57,9 +57,9 @@ Optional declarations, only when the app needs them:
 
 ```php
 Authorization::systemAbilities(SystemAbility::class);          // deny-by-default gate per case
-Authorization::resolveTenantUsing(fn (User $user) => $user->company_id);
-Authorization::tenantColumn('company_id');                      // default: 'tenant_id'
-Authorization::resolveTeamsUsing(fn (Request $request) => $request->user()?->company_id);
+Authorization::resolveTenantUsing(fn (User $user) => $user->company_id);   // legacy; unneeded with tenancy.model set
+Authorization::tenantColumn('company_id');                      // legacy; defaults to tenancy.foreign_key
+Authorization::resolveTeamsUsing(fn (Request $request) => $request->user()?->company_id);  // teams without tenancy only
 Authorization::bypassUsing(NoBypass::class);
 ```
 
@@ -197,11 +197,54 @@ artisan authorization:sync             # create + grant/revoke
 artisan authorization:sync --prune     # also delete stale permissions
 ```
 
+## Tenancy
+
+Config-driven (`config/authorization.php`, publish tag `authorization-config`):
+`tenancy.model` switches it on; the tenant is the Spatie team. `resolver` is `user`
+(column on the user) or `session` (switchable, membership-validated). Everything
+downstream consumes `CurrentTenant` (`Tenancy` facade) and never knows the mode.
+
+```php
+use BelongsToTenant;                                   // scope + autofill + tenant()
+protected static function tenantRelationPath(): ?string { return 'post'; }  // transitive owner
+
+Tenancy::id() / get() / set($tenant) / forget()
+Tenancy::withoutTenant(fn () => …)                     // the ONLY bypass; no withoutGlobalScope at call sites
+Tenancy::forTenant($other, fn () => …)
+```
+
+Scope is fail-closed: no tenant + no bypass ⇒ no rows, `MissingTenantContextException`
+when `tenancy.strict`. Cross-tenant bindings 404. Sessionless code (jobs, seeders,
+commands) must wrap in `withoutTenant()` or `forTenant()`; queued jobs inherit the
+dispatcher's tenant/bypass via `Context`.
+
+Wire in `bootstrap/app.php`: `$middleware->web(append: [SetCurrentTenant::class])` — the
+package registers no group middleware itself (a provider push is dropped when the app
+configures its groups). Livewire persistent
+middleware is registered automatically when Livewire is present.
+
+**Tenant-level roles are assigned inside the tenant** (`TenantMembership::add`), also in
+`user` mode — a global (`team_id NULL`) role is invisible while a tenant is active. Only
+super-admin roles are global.
+
+Middleware: `SetCurrentTenant` (priority before `SubstituteBindings`),
+`EnsureTenantSelected` (403 / `missing_tenant_redirect`), `EnsurePlatformArea`
+(`accessPlatformAdmin` deny-all gate + request-wide bypass). Platform admin is a
+**global** role; `RoleBypass` reads the global assignment regardless of the active team.
+
+Membership writes go through `Tenancy\TenantMembership` (`add / changeRole / remove /
+roleFor / isMember`). `Tenancy\CurrentArea` resolves the UI area from route-name
+`Str::is` patterns (`authorization.areas`, default `*platform.*`) — separate from the tenant on purpose.
+
+Tests: `Testing\InteractsWithTenancy` — `actingAsInTenant($user, $tenant, $role)`,
+`withoutTenant()`, `forTenant()`, `assertFailsClosed(Model::class)`.
+
 ## Teams (Multi-Tenancy)
 
-Single source of truth: `config/permission.php` → `'teams' => true`. The package then
-pushes `SetPermissionsTeam` onto `web` **only**; for API routes push it yourself in
-`bootstrap/app.php`: `$middleware->appendToGroup('api', SetPermissionsTeam::class)`.
+Single source of truth: `config/permission.php` → `'teams' => true`. Without tenancy,
+wire `SetPermissionsTeam` yourself in `bootstrap/app.php`
+(`$middleware->web(append: [SetPermissionsTeam::class])`); with tenancy, `SetCurrentTenant`
+replaces it. The package registers no group middleware.
 It resolves the team id via `Authorization::teamResolver()` (default reads the user's
 team foreign key; override with a `TeamResolver` class or closure).
 
