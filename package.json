@@ -1,7 +1,7 @@
 {
     "private": true,
     "type": "module",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "scripts": {
         "commitlint": "commitlint",
         "release:patch": "commit-and-tag-version --release-as patch",
