@@ -206,3 +206,12 @@ CLAUDE.md claims no auto-routing layout (it has one); oohire's CLAUDE.md/docs/gl
 reference a `.claude/rules/authorization.md` that does not exist and list helpers that
 moved to `tests/Concerns/InteractsWithOrganizations.php`; lead-crm's `docs/crm-schema.md`
 describes an abandoned schema.
+
+---
+
+## 6. Follow-ups after 1.1.0 — done in 1.1.1 (2026-08-24)
+
+Strict-model tolerance in `FromUserResolver` (`getAttributes()` instead of `getAttribute()`),
+`CurrentTenant::enterBypass()` marked `@internal`, teams-without-tenancy middleware wiring
+documented in README/ADOPTION and pinned by a test. The `SetPermissionsTeam` auto-push had
+already been removed in 1.1.0. App rollouts (§5) remain out of the package's scope.
