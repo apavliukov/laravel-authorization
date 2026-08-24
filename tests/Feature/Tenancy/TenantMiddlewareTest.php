@@ -16,6 +16,7 @@ use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TenancyTestCase;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -50,6 +51,16 @@ final class TenantMiddlewareTest extends TenancyTestCase
         $user = User::factory()->create(['organization_id' => $this->acme->id]);
 
         $this->actingAs($user)->get('/tenant')->assertSee((string) $this->acme->id);
+    }
+
+    #[Test]
+    public function user_mode_tolerates_a_strict_user_instance_without_the_column(): void
+    {
+        Model::preventAccessingMissingAttributes();
+        $user = User::factory()->create();
+        $user->setRawAttributes(['id' => $user->id]);
+
+        $this->actingAs($user)->get('/tenant')->assertOk()->assertContent('');
     }
 
     #[Test]
