@@ -88,7 +88,11 @@ final class CurrentTenant
         return Context::getHidden(self::BYPASS_KEY) === true;
     }
 
-    /** Bypass for the rest of the request — middleware only; code uses withoutTenant(). */
+    /**
+     * Bypass for the rest of the request — middleware only; code uses withoutTenant().
+     *
+     * @internal
+     */
     public function enterBypass(): void
     {
         Context::addHidden(self::BYPASS_KEY, true);

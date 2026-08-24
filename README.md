@@ -429,6 +429,9 @@ final class Comment extends Model
 }
 ```
 
+On such a transitive model `tenant()` throws a `LogicException` — walk the relation
+(`$comment->post->tenant`) instead.
+
 The scope is **fail-closed**: no current tenant and no bypass ⇒ no rows, and a
 `MissingTenantContextException` when `strict` is on. Creating with no tenant and no
 explicit key always throws, bypass or not — a bypass never produces orphans.

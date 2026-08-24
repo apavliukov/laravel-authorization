@@ -232,8 +232,9 @@ The resolver closure may type-hint the concrete user model, so scoped policies
 never touch `$user` and need no `/** @var User */` narrowing.
 
 **Tenancy with Spatie teams** — turn teams on; role/permission assignments become
-team-scoped automatically (set the team id per request via `SetPermissionsTeam`,
-which the package registers when teams are on). Use `ownsModel()` only as an extra
+team-scoped automatically (with tenancy on `SetCurrentTenant` sets the team id per
+request; without it wire `SetPermissionsTeam` in `bootstrap/app.php` yourself — the
+package registers no group middleware). Use `ownsModel()` only as an extra
 ownership fence if needed. No bypass for tenant admins.
 
 **"Manage across the tenant OR own it"** — override the method (CRUD methods are
