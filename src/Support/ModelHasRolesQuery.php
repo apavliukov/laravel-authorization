@@ -7,7 +7,9 @@ namespace AlexPavliukov\Authorization\Support;
 use BackedEnum;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Query\Builder as QueryBuilder;
+use RuntimeException;
 
 /**
  * Team-aware reads against Spatie's `model_has_roles` pivot, without mutating the
@@ -26,6 +28,9 @@ final class ModelHasRolesQuery
 
     /** @var array<string, list<string>> */
     private array $rolesCache = [];
+
+    /** @var array<string, list<int|string>> */
+    private array $teamIdsCache = [];
 
     public static function roleName(BackedEnum|string $role): string
     {
@@ -89,24 +94,98 @@ final class ModelHasRolesQuery
     }
 
     /**
+     * The distinct teams the user holds any role in (global assignments excluded).
+     *
+     * @return list<int|string>
+     */
+    public function teamIdsOf(Model $user): array
+    {
+        $key = $this->cacheKey($user);
+
+        return $this->teamIdsCache[$key] ??= $this->queryTeamIdsOf($user);
+    }
+
+    /** Delete every role row of the user — in every team and globally. */
+    public function detachAll(Model $user): void
+    {
+        $user->getConnection()->table($this->pivotTable())
+            ->where($this->morphKey(), $user->getKey())
+            ->where('model_type', $user->getMorphClass())
+            ->delete();
+
+        $user->unsetRelation('roles');
+    }
+
+    /**
+     * The tenants (Spatie teams) the user holds any role in, as a relation —
+     * for eager loading and pivot-aware queries. DISTINCT collapses several roles
+     * in one team; `count()` compiles to `count(*)` and ignores it — use `exists()`
+     * or `count('<table>.id')`.
+     *
+     * @param  class-string<Model>  $tenantClass
+     * @return MorphToMany<Model, Model>
+     */
+    public function tenantsOf(Model $user, string $tenantClass): MorphToMany
+    {
+        return $user->morphToMany($tenantClass, 'model', $this->pivotTable(), $this->morphKey(), $this->teamKey())->distinct();
+    }
+
+    /**
+     * The users holding any role in the tenant's team, as a relation. The user
+     * class is the one behind the guard the roles are filtered by. Same
+     * `count()` caveat as tenantsOf().
+     *
+     * @return MorphToMany<Model, Model>
+     */
+    public function membersOf(Model $tenant): MorphToMany
+    {
+        /** @var class-string<Model>|null $userClass */
+        $userClass = getModelForGuard($this->guard());
+
+        if ($userClass === null) {
+            throw new RuntimeException("No user model behind guard [{$this->guard()}].");
+        }
+
+        return $tenant->morphedByMany($userClass, 'model', $this->pivotTable(), $this->teamKey(), $this->morphKey())->distinct();
+    }
+
+    /**
      * Drop the memoized reads for a single user — call after mutating that user's
      * roles within the same request, before reading them again.
      */
     public function forget(Model $user): void
     {
-        $prefix = $this->cacheKey($user).'|';
+        $key = $this->cacheKey($user);
+        $prefix = $key.'|';
 
-        foreach (array_keys($this->hasCache) as $key) {
-            if (str_starts_with($key, $prefix)) {
-                unset($this->hasCache[$key]);
+        foreach (array_keys($this->hasCache) as $cached) {
+            if (str_starts_with($cached, $prefix)) {
+                unset($this->hasCache[$cached]);
             }
         }
 
-        foreach (array_keys($this->rolesCache) as $key) {
-            if (str_starts_with($key, $prefix)) {
-                unset($this->rolesCache[$key]);
+        foreach (array_keys($this->rolesCache) as $cached) {
+            if (str_starts_with($cached, $prefix)) {
+                unset($this->rolesCache[$cached]);
             }
         }
+
+        unset($this->teamIdsCache[$key]);
+    }
+
+    /** @return list<int|string> */
+    private function queryTeamIdsOf(Model $user): array
+    {
+        /** @var list<int|string> $ids */
+        $ids = $user->getConnection()->table($this->pivotTable())
+            ->where($this->morphKey(), $user->getKey())
+            ->where('model_type', $user->getMorphClass())
+            ->whereNotNull($this->teamKey())
+            ->distinct()
+            ->pluck($this->teamKey())
+            ->all();
+
+        return $ids;
     }
 
     /** @return list<string> */

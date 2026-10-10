@@ -36,17 +36,7 @@ final readonly class RoleBypass implements BypassStrategy
             return false;
         }
 
-        if (config('permission.teams') === true) {
-            return $this->manager->isGlobalSuperAdmin($user);
-        }
-
-        $superAdminRoleNames = array_map(
-            static fn (BackedEnum $role): string => (string) $role->value,
-            $this->manager->superAdminRoles(),
-        );
-
-        /** @phpstan-ignore method.notFound (the package requires the user to use Spatie\Permission\Traits\HasRoles) */
-        return $user->hasAnyRole($superAdminRoleNames);
+        return $this->manager->isSuperAdmin($user);
     }
 
     private function isProtected(string $ability): bool

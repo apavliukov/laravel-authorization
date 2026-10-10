@@ -351,8 +351,6 @@ One tenancy layer, switched on by config. Publish it with
 'tenancy' => [
     'model' => App\Models\Organization::class,   // null = no tenancy
     'foreign_key' => 'organization_id',
-    'resolver' => 'user',        // 'user' | 'session'
-    'user_column' => 'organization_id',
     'session_key' => 'current_organization_id',
     'strict' => env('APP_ENV') !== 'production',
     'missing_tenant_redirect' => null,            // route name, e.g. 'organizations.pick'
@@ -363,13 +361,30 @@ The tenant **is** the Spatie team: turn `permission.teams` on and make
 `model_has_roles.team_id` nullable (see [Teams](#teams)). The app owns the tenant
 model; the package needs nothing from it beyond a primary key.
 
-Two resolution modes, one code path:
+**Membership = a role row in `model_has_roles` with `team_id`. Nothing else** — no
+tenant column on `users`, no pivot table. A user may hold roles in any number of
+tenants plus global roles (`team_id NULL`). One resolver (`Tenancy\TenantResolver`):
 
-- **`user`** — one tenant per user, read from `user_column`.
-- **`session`** — the user belongs to many tenants; the active one lives in
-  `session_key` and is honoured only while the user holds a role in that team. A
-  global super-admin may enter any tenant (the "pin an organization for the
-  platform admin" flow needs no workaround).
+1. the `session_key` value, honoured only while the user is a member of that tenant
+   (a global super-admin may enter any tenant that exists); a stale key is dropped;
+2. otherwise the user's **sole** tenant;
+3. otherwise none — several tenants and no session choice never pick an arbitrary
+   row (`EnsureTenantSelected` then 403s / redirects to `missing_tenant_redirect`).
+
+```php
+use AlexPavliukov\Authorization\Tenancy\Concerns\HasMembers;            // tenant model
+use AlexPavliukov\Authorization\Tenancy\Concerns\HasTenantMemberships;  // user model
+use AlexPavliukov\Authorization\Concerns\HasAppRole;                     // user model
+
+$organization->members();        // MorphToMany users through model_has_roles
+$user->tenants();                // MorphToMany tenants through model_has_roles
+$user->app_role;                 // highest-priority role held anywhere (enum case) or null
+$user->is_platform_admin;        // global super-admin (team-agnostic)
+```
+
+Writes go through `TenantMembership`: `add / changeRole / remove` inside a tenant,
+`assignGlobal($user, $role)` for platform roles, `removeEverywhere($user)` to detach
+across every tenant and globally, `tenantIdsOf($user)` for the memoized id list.
 
 ### Wiring the middleware
 
@@ -400,10 +415,10 @@ persistent list, include these three.
 
 With tenancy on, Spatie answers `hasRole()` / `can()` against the **active team**.
 So every tenant-level role (owner, member, editor …) must be assigned *within* the
-tenant — `TenantMembership::add($user, $tenant, Role::OWNER)` — even in `user`
-mode where each user has exactly one tenant. A role assigned globally
-(`team_id IS NULL`) is invisible while a tenant is active; only super-admin roles
-belong there (`assignRoleInTeam($user, Role::PLATFORM_ADMIN, null)`). Seeders and
+tenant — `TenantMembership::add($user, $tenant, Role::OWNER)` — also when each user
+has exactly one tenant. A role assigned globally (`team_id IS NULL`) is invisible
+while a tenant is active; only super-admin roles belong there
+(`TenantMembership::assignGlobal($user, Role::PLATFORM_ADMIN)`). Seeders and
 registration flows that call `$user->assignRole()` directly must run inside
 `Tenancy::forTenant()` or use `TenantMembership`.
 

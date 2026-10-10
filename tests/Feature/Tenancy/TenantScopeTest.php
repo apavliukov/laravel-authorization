@@ -7,7 +7,9 @@ namespace AlexPavliukov\Authorization\Tests\Feature\Tenancy;
 use AlexPavliukov\Authorization\Tenancy\BelongsToTenant;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\MissingTenantContextException;
+use AlexPavliukov\Authorization\Tenancy\TenantMembership;
 use AlexPavliukov\Authorization\Tenancy\TenantScope;
+use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Comment;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
@@ -100,8 +102,8 @@ final class TenantScopeTest extends TenancyTestCase
         Route::middleware('web')->get('/posts/{post}', static fn (Post $post): string => $post->title);
         $foreign = resolve(CurrentTenant::class)->withoutTenant(static fn (): Post => Post::query()->where('title', 'globex post')->firstOrFail());
 
-        config()->set('authorization.tenancy.resolver', 'user');
-        $user = User::factory()->create(['organization_id' => $this->acme->id]);
+        $user = User::factory()->create();
+        resolve(TenantMembership::class)->add($user, $this->acme, Role::MEMBER);
 
         $this->actingAs($user)->get("/posts/{$foreign->id}")->assertNotFound();
     }

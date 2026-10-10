@@ -19,13 +19,12 @@ return [
         // App\Models\Organization::class
         'model' => null,
 
-        // Column on tenant-owned tables (and on users for the `user` resolver).
+        // Column on tenant-owned tables.
         'foreign_key' => 'organization_id',
 
-        // `user`: one tenant per user, read from `user_column`.
-        // `session`: user belongs to many tenants; the active one is kept in `session_key`.
-        'resolver' => 'user',
-        'user_column' => 'organization_id',
+        // Membership = a role in the tenant's team (model_has_roles.team_id). The
+        // active tenant is the session choice (validated against membership),
+        // else the user's sole team, else none.
         'session_key' => 'current_organization_id',
 
         // Throw MissingTenantContextException when a tenant-owned query runs with

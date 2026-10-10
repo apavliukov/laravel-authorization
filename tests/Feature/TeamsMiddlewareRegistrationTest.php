@@ -19,6 +19,8 @@ final class TeamsMiddlewareRegistrationTest extends TestCase
 {
     protected function defineEnvironment($app): void
     {
+        parent::defineEnvironment($app);
+
         /** @var Application $app */
         $app['config']->set('permission.teams', true);
         $app['config']->set('authorization.tenancy.model', null);

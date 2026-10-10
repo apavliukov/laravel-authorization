@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization\Tests\Feature\Tenancy;
 
+use AlexPavliukov\Authorization\Authorization;
+use AlexPavliukov\Authorization\Concerns\HasAppRole;
+use AlexPavliukov\Authorization\Tenancy\Concerns\HasMembers;
+use AlexPavliukov\Authorization\Tenancy\Concerns\HasTenantMemberships;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\Tenancy;
 use AlexPavliukov\Authorization\Tenancy\TenantMembership;
@@ -18,40 +22,123 @@ use PHPUnit\Framework\Attributes\Test;
 #[Group('tenancy')]
 #[CoversClass(TenantMembership::class)]
 #[CoversClass(Tenancy::class)]
+#[CoversClass(HasMembers::class)]
+#[CoversClass(HasTenantMemberships::class)]
+#[CoversClass(HasAppRole::class)]
 final class TenantMembershipTest extends TenancyTestCase
 {
+    private Organization $acme;
+
+    private Organization $globex;
+
+    private TenantMembership $membership;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->acme = Organization::query()->create(['name' => 'Acme']);
+        $this->globex = Organization::query()->create(['name' => 'Globex']);
+        $this->membership = resolve(TenantMembership::class);
+    }
+
     #[Test]
     public function add_change_and_remove_keep_the_active_tenant_untouched(): void
     {
-        $acme = Organization::query()->create(['name' => 'Acme']);
-        $globex = Organization::query()->create(['name' => 'Globex']);
         $user = User::factory()->create();
-        resolve(CurrentTenant::class)->set($globex);
+        resolve(CurrentTenant::class)->set($this->globex);
 
-        $membership = resolve(TenantMembership::class);
+        $this->membership->add($user, $this->acme, Role::MEMBER);
+        $this->assertSame('member', $this->membership->roleFor($user, $this->acme));
+        $this->assertTrue($this->membership->isMember($user, $this->acme));
 
-        $membership->add($user, $acme, Role::MEMBER);
-        $this->assertSame('member', $membership->roleFor($user, $acme));
-        $this->assertTrue($membership->isMember($user, $acme));
+        $this->membership->changeRole($user, $this->acme, Role::EDITOR);
+        $this->assertSame('editor', $this->membership->roleFor($user, $this->acme));
 
-        $membership->changeRole($user, $acme, Role::EDITOR);
-        $this->assertSame('editor', $membership->roleFor($user, $acme));
+        $this->membership->remove($user, $this->acme);
+        $this->assertNull($this->membership->roleFor($user, $this->acme));
+        $this->assertFalse($this->membership->isMember($user, $this->acme));
 
-        $membership->remove($user, $acme);
-        $this->assertNull($membership->roleFor($user, $acme));
-        $this->assertFalse($membership->isMember($user, $acme));
+        $this->assertSame($this->globex->id, resolve(CurrentTenant::class)->id());
+        $this->assertSame($this->globex->id, getPermissionsTeamId());
+    }
 
-        $this->assertSame($globex->id, resolve(CurrentTenant::class)->id());
-        $this->assertSame($globex->id, getPermissionsTeamId());
+    #[Test]
+    public function tenant_ids_and_relations_read_model_has_roles_and_ignore_global_roles(): void
+    {
+        $user = User::factory()->create();
+        $this->membership->assignGlobal($user, Role::ADMIN);
+        $this->assertSame([], $this->membership->tenantIdsOf($user));
+
+        $this->membership->add($user, $this->acme, Role::MEMBER);
+        $this->membership->add($user, $this->acme, Role::EDITOR);   // two roles, one membership
+        $this->membership->add($user, $this->globex, Role::MEMBER);
+
+        $this->assertEqualsCanonicalizing([$this->acme->id, $this->globex->id], $this->membership->tenantIdsOf($user));
+        $this->assertEqualsCanonicalizing([$this->acme->id, $this->globex->id], $user->tenants()->pluck('id')->all());
+        $this->assertSame([$user->id], $this->acme->members()->pluck('id')->all());
+        $this->assertSame([], Organization::query()->create(['name' => 'Empty'])->members()->pluck('id')->all());
+    }
+
+    #[Test]
+    public function a_membership_write_refreshes_tenant_ids_even_with_warm_role_memos(): void
+    {
+        $user = User::factory()->create();
+        $this->membership->add($user, $this->acme, Role::MEMBER);
+
+        // Warm every memo the resolver touches: roles-in-team, has-role, team ids.
+        $this->assertTrue($this->membership->isMember($user, $this->acme));
+        $this->assertFalse(Authorization::isGlobalSuperAdmin($user));
+        $this->assertSame([$this->acme->id], $this->membership->tenantIdsOf($user));
+
+        $this->membership->add($user, $this->globex, Role::MEMBER);
+        $this->assertEqualsCanonicalizing([$this->acme->id, $this->globex->id], $this->membership->tenantIdsOf($user));
+
+        $this->membership->remove($user, $this->acme);
+        $this->assertSame([$this->globex->id], $this->membership->tenantIdsOf($user));
+        $this->assertSame(1, $this->globex->members()->count('users.id'));
+    }
+
+    #[Test]
+    public function remove_everywhere_detaches_every_team_and_the_global_role(): void
+    {
+        $user = User::factory()->create();
+        $this->membership->assignGlobal($user, Role::ADMIN);
+        $this->membership->add($user, $this->acme, Role::MEMBER);
+        $this->membership->add($user, $this->globex, Role::MEMBER);
+        $this->assertTrue(Authorization::isGlobalSuperAdmin($user));
+
+        $this->membership->removeEverywhere($user);
+
+        $this->assertSame([], $this->membership->tenantIdsOf($user));
+        $this->assertFalse(Authorization::isGlobalSuperAdmin($user));
+        $this->assertFalse($this->membership->isMember($user, $this->acme));
+        $this->assertNull($user->app_role);
+    }
+
+    #[Test]
+    public function the_identity_trait_is_team_agnostic(): void
+    {
+        $admin = User::factory()->create();
+        $member = User::factory()->create();
+        $this->membership->assignGlobal($admin, Role::ADMIN);
+        $this->membership->add($member, $this->acme, Role::MEMBER);
+        $this->membership->add($member, $this->globex, Role::ADMIN);   // tenant-scoped copy: not platform admin
+
+        resolve(CurrentTenant::class)->set($this->acme);
+
+        $this->assertTrue($admin->is_platform_admin);
+        $this->assertSame(Role::ADMIN, $admin->app_role);
+        $this->assertFalse($member->is_platform_admin);
+        $this->assertSame(Role::ADMIN, $member->app_role);   // highest role held anywhere
     }
 
     #[Test]
     public function the_facade_proxies_the_current_tenant(): void
     {
-        $acme = Organization::query()->create(['name' => 'Acme']);
-        Tenancy::set($acme);
+        Tenancy::set($this->acme);
 
-        $this->assertSame($acme->id, Tenancy::id());
+        $this->assertSame($this->acme->id, Tenancy::id());
         $this->assertTrue(Tenancy::withoutTenant(static fn (): bool => Tenancy::isBypassed()));
     }
 }

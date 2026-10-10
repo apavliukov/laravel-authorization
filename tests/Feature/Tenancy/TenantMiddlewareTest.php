@@ -7,16 +7,14 @@ namespace AlexPavliukov\Authorization\Tests\Feature\Tenancy;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\EnsurePlatformArea;
 use AlexPavliukov\Authorization\Tenancy\EnsureTenantSelected;
-use AlexPavliukov\Authorization\Tenancy\FromSessionResolver;
-use AlexPavliukov\Authorization\Tenancy\FromUserResolver;
 use AlexPavliukov\Authorization\Tenancy\SetCurrentTenant;
+use AlexPavliukov\Authorization\Tenancy\TenantResolver;
 use AlexPavliukov\Authorization\Testing\InteractsWithAuthorization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TenancyTestCase;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -24,8 +22,7 @@ use PHPUnit\Framework\Attributes\Test;
 
 #[Group('tenancy')]
 #[CoversClass(SetCurrentTenant::class)]
-#[CoversClass(FromUserResolver::class)]
-#[CoversClass(FromSessionResolver::class)]
+#[CoversClass(TenantResolver::class)]
 #[CoversClass(EnsureTenantSelected::class)]
 #[CoversClass(EnsurePlatformArea::class)]
 final class TenantMiddlewareTest extends TenancyTestCase
@@ -34,11 +31,14 @@ final class TenantMiddlewareTest extends TenancyTestCase
 
     private Organization $acme;
 
+    private Organization $globex;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->acme = Organization::query()->create(['name' => 'Acme']);
+        $this->globex = Organization::query()->create(['name' => 'Globex']);
 
         Route::middleware('web')->get('/tenant', static fn (): string => (string) resolve(CurrentTenant::class)->id());
         Route::middleware(['web', EnsureTenantSelected::class])->get('/needs-tenant', static fn (): string => 'ok');
@@ -46,74 +46,76 @@ final class TenantMiddlewareTest extends TenancyTestCase
     }
 
     #[Test]
-    public function user_mode_reads_the_tenant_from_the_user_column(): void
+    public function a_sole_membership_is_the_tenant_without_a_session_choice(): void
     {
-        $user = User::factory()->create(['organization_id' => $this->acme->id]);
+        $user = User::factory()->create();
+        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
 
-        $this->actingAs($user)->get('/tenant')->assertSee((string) $this->acme->id);
+        $this->actingAs($user)->get('/tenant')->assertOk()->assertContent((string) $this->acme->id);
     }
 
     #[Test]
-    public function user_mode_tolerates_a_strict_user_instance_without_the_column(): void
+    public function several_memberships_and_no_session_choice_resolve_to_no_tenant(): void
     {
-        Model::preventAccessingMissingAttributes();
         $user = User::factory()->create();
-        $user->setRawAttributes(['id' => $user->id]);
+        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
+        $this->assignRoleInTeam($user, Role::EDITOR, $this->globex->id);
 
         $this->actingAs($user)->get('/tenant')->assertOk()->assertContent('');
+        $this->actingAs($user)->get('/needs-tenant')->assertForbidden();
     }
 
     #[Test]
-    public function session_mode_honours_the_session_tenant_when_the_user_is_a_member(): void
+    public function a_global_role_alone_is_not_a_membership(): void
     {
-        config()->set('authorization.tenancy.resolver', 'session');
+        $admin = User::factory()->create();
+        $this->assignRoleInTeam($admin, Role::ADMIN, null);
+
+        $this->actingAs($admin)->get('/tenant')->assertOk()->assertContent('');
+    }
+
+    #[Test]
+    public function the_session_choice_wins_when_the_user_is_a_member(): void
+    {
+        $user = User::factory()->create();
+        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
+        $this->assignRoleInTeam($user, Role::MEMBER, $this->globex->id);
+
+        $this->actingAs($user)
+            ->withSession([TenantResolver::sessionKey() => $this->globex->id])
+            ->get('/tenant')
+            ->assertContent((string) $this->globex->id);
+    }
+
+    #[Test]
+    public function a_session_tenant_the_user_does_not_belong_to_is_dropped_and_falls_back(): void
+    {
         $user = User::factory()->create();
         $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
 
         $this->actingAs($user)
-            ->withSession([FromSessionResolver::sessionKey() => $this->acme->id])
+            ->withSession([TenantResolver::sessionKey() => $this->globex->id])
             ->get('/tenant')
-            ->assertSee((string) $this->acme->id);
+            ->assertContent((string) $this->acme->id)
+            ->assertSessionMissing(TenantResolver::sessionKey());
     }
 
     #[Test]
-    public function session_mode_drops_a_session_tenant_the_user_does_not_belong_to(): void
+    public function a_global_super_admin_may_enter_any_tenant_that_exists(): void
     {
-        config()->set('authorization.tenancy.resolver', 'session');
-        $user = User::factory()->create();
-
-        $this->actingAs($user)
-            ->withSession([FromSessionResolver::sessionKey() => $this->acme->id])
-            ->get('/tenant')
-            ->assertSee('')
-            ->assertSessionMissing(FromSessionResolver::sessionKey());
-    }
-
-    #[Test]
-    public function session_mode_lets_a_global_super_admin_enter_any_tenant(): void
-    {
-        config()->set('authorization.tenancy.resolver', 'session');
         $admin = User::factory()->create();
         $this->assignRoleInTeam($admin, Role::ADMIN, null);
 
         $this->actingAs($admin)
-            ->withSession([FromSessionResolver::sessionKey() => $this->acme->id])
+            ->withSession([TenantResolver::sessionKey() => $this->acme->id])
             ->get('/tenant')
-            ->assertSee((string) $this->acme->id);
-    }
-
-    #[Test]
-    public function session_mode_drops_a_stale_tenant_id_even_for_a_super_admin(): void
-    {
-        config()->set('authorization.tenancy.resolver', 'session');
-        $admin = User::factory()->create();
-        $this->assignRoleInTeam($admin, Role::ADMIN, null);
+            ->assertContent((string) $this->acme->id);
 
         $this->actingAs($admin)
-            ->withSession([FromSessionResolver::sessionKey() => 999])
+            ->withSession([TenantResolver::sessionKey() => 999])
             ->get('/tenant')
-            ->assertSee('')
-            ->assertSessionMissing(FromSessionResolver::sessionKey());
+            ->assertContent('')
+            ->assertSessionMissing(TenantResolver::sessionKey());
     }
 
     #[Test]
@@ -134,7 +136,8 @@ final class TenantMiddlewareTest extends TenancyTestCase
     #[Test]
     public function ensure_tenant_selected_passes_with_a_tenant(): void
     {
-        $user = User::factory()->create(['organization_id' => $this->acme->id]);
+        $user = User::factory()->create();
+        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
 
         $this->actingAs($user)->get('/needs-tenant')->assertOk();
     }

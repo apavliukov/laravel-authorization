@@ -8,7 +8,6 @@ use AlexPavliukov\Authorization\Console\MakePolicyCommand;
 use AlexPavliukov\Authorization\Console\SyncCommand;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
-use AlexPavliukov\Authorization\Contracts\TenantResolver;
 use AlexPavliukov\Authorization\Support\BypassGate;
 use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
 use AlexPavliukov\Authorization\Support\RoleBypass;
@@ -17,8 +16,6 @@ use AlexPavliukov\Authorization\Teams\DefaultTeamResolver;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\EnsurePlatformArea;
 use AlexPavliukov\Authorization\Tenancy\EnsureTenantSelected;
-use AlexPavliukov\Authorization\Tenancy\FromSessionResolver;
-use AlexPavliukov\Authorization\Tenancy\FromUserResolver;
 use AlexPavliukov\Authorization\Tenancy\SetCurrentTenant;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Routing\Middleware\SubstituteBindings;
@@ -35,9 +32,6 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         $this->app->singleton(AuthorizationManager::class);
         $this->app->singleton(CurrentTenant::class);
-        $this->app->bind(TenantResolver::class, static fn (): TenantResolver => config('authorization.tenancy.resolver') === 'session'
-            ? resolve(FromSessionResolver::class)
-            : new FromUserResolver);
         $this->app->scoped(ModelHasRolesQuery::class);
         $this->app->scoped(UserPermissionMemo::class);
         $this->app->bind(TeamResolver::class, DefaultTeamResolver::class);
@@ -47,9 +41,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
     public function boot(): void
     {
         BypassGate::register();
+        // Always: "platform admin without tenants" is a config state, not an app-side Gate::define.
+        Gate::define(EnsurePlatformArea::GATE, static fn (): bool => false);
 
         if ($this->app->make(CurrentTenant::class)->isConfigured()) {
-            Gate::define(EnsurePlatformArea::GATE, static fn (): bool => false);
             Context::hydrated(static function (): void {
                 resolve(CurrentTenant::class)->syncPermissionsTeam();
             });

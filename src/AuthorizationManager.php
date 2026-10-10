@@ -144,6 +144,20 @@ final class AuthorizationManager
     }
 
     /**
+     * Super-admin identity regardless of the active team: with Spatie teams on,
+     * only the global assignment counts (isGlobalSuperAdmin); without teams, any
+     * super-admin role. The basis of RoleBypass and `is_platform_admin`.
+     */
+    public function isSuperAdmin(Authenticatable $user): bool
+    {
+        if (config('permission.teams') === true) {
+            return $this->isGlobalSuperAdmin($user);
+        }
+
+        return array_any($this->superAdminRoles(), fn (BackedEnum $role): bool => $this->userHasRole($user, $role));
+    }
+
+    /**
      * Whether the user holds the role assigned within the given team, independent
      * of the active permissions team.
      */

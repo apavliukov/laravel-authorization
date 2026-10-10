@@ -12,7 +12,7 @@ resolve against the specific project** (don't guess these).
 > package**, not to bend the package to the app's existing (possibly divergent)
 > shape.
 
-- **Composer:** `apavliukov/laravel-authorization` (`^1.1`)
+- **Composer:** `apavliukov/laravel-authorization` (`^1.2`)
 - **Namespace:** `AlexPavliukov\Authorization\`
 - **Requires:** PHP `^8.4`, Laravel `^13`, `spatie/laravel-permission ^8.0`
 
@@ -24,15 +24,15 @@ These are **not inferable from the package**. Read the app's current auth code a
 decide each one explicitly before refactoring:
 
 1. **Is there multi-tenancy?** If yes, the package's tenancy layer is the answer —
-   not per-app scopes. Set `authorization.tenancy.model` and pick the mode:
-   `resolver => 'user'` (one tenant per user, read from a user column) or
-   `'session'` (many tenants per user, active one in session, validated by team
-   membership). Tenant-owned models take `BelongsToTenant`; models that reach the
-   tenant through another model override `tenantRelationPath()`. Wire
-   `SetCurrentTenant` explicitly in `bootstrap/app.php` (`->web(append:)`), and
-   assign every tenant-level role *inside* the tenant (`TenantMembership`) — a
-   global role is invisible while a tenant is active. See README "Tenancy". A "team" that is a visibility group *inside* one tenant (no
-   `team_id` on domain tables) is **not** a tenant — leave tenancy off.
+   not per-app scopes. Set `authorization.tenancy.model`. **Membership = a role in
+   the tenant's team (`model_has_roles.team_id`), nothing else** — delete any
+   `users.<tenant>_id` column or membership pivot; `HasMembers` / `HasTenantMemberships`
+   give the relations, `TenantResolver` picks session choice → sole tenant → none.
+   Tenant-owned models take `BelongsToTenant`; models that reach the tenant through
+   another model override `tenantRelationPath()`. Wire `SetCurrentTenant` explicitly
+   in `bootstrap/app.php` (`->web(append:)`), and assign every tenant-level role
+   *inside* the tenant (`TenantMembership`) — a global role is invisible while a
+   tenant is active. See README "Tenancy".
 2. **Spatie teams: on or off?** With tenancy on, teams are **on** and the tenant is
    the team — no choice. Without tenancy, turn teams on only if you need
    team-scoped role assignments. **Platform-level (global) roles under teams** are
@@ -85,8 +85,10 @@ PermissionSync + AuthorizationSeeder   plan()/apply(prune) + idempotent seeding;
 Teams (optional)     DefaultTeamResolver | CallbackTeamResolver + SetPermissionsTeam middleware (wire it in bootstrap/app.php)
 Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam / primaryRole / userCan (memoized, request-scoped) + HasTeamAwareRoles query scopes
 Testing\InteractsWithAuthorization   test primitives (assignRoleInTeam / withPermissionsTeam / roleModelId / resetPermissionsTeam)
-Tenancy (config-driven)   CurrentTenant (+ Tenancy facade) | BelongsToTenant + TenantScope (fail-closed) | FromUser/FromSession resolvers
-                          SetCurrentTenant / EnsureTenantSelected / EnsurePlatformArea | TenantMembership | CurrentArea
+Tenancy (config-driven)   CurrentTenant (+ Tenancy facade) | BelongsToTenant + TenantScope (fail-closed) | TenantResolver (session → sole tenant → none)
+                          SetCurrentTenant / EnsureTenantSelected / EnsurePlatformArea | TenantMembership (add/changeRole/remove/assignGlobal/removeEverywhere/tenantIdsOf) | CurrentArea
+                          Concerns\HasMembers (tenant) / Concerns\HasTenantMemberships (user) — relations through model_has_roles
+Concerns\HasAppRole      $user->app_role / $user->is_platform_admin (team-agnostic identity; also without tenancy)
 Testing\InteractsWithTenancy   actingAsInTenant / withoutTenant / forTenant / assertFailsClosed
 make:authorization-policy {Model}    scaffolds a policy
 ```
@@ -161,6 +163,46 @@ current code as **things to fix**, not preserve.
   `'web'`.
 - **Package code has zero `App\` references.** Anything app-specific (role enum,
   models, concrete policies, system abilities, tenancy keys) stays in the app.
+
+### Tenancy conventions — every app converges here
+
+Decided 2026-10-10 across the four apps that share this package (starter, opiny,
+oohire, lead-crm); treat divergences as things to fix.
+
+- **Membership = a role row in `model_has_roles` with `team_id`. Nothing else.** No
+  `users.<tenant>_id`, no membership pivot, no JSON. A user may hold roles in any
+  number of tenants plus global roles (`team_id NULL`); "one role per user" is not a
+  rule. Reads: `tenants()` / `members()` / `TenantMembership::tenantIdsOf()`. Writes:
+  `TenantMembership` only (`add / changeRole / remove / assignGlobal / removeEverywhere`).
+- **One resolver**: session choice (validated against membership; a global super-admin
+  may enter any existing tenant) → the user's sole tenant → none. Several tenants and
+  no choice ⇒ no tenant, never an arbitrary row. An app with multi-membership therefore
+  ships an organization picker (writes `tenancy.session_key`) and points
+  `missing_tenant_redirect` at it — the picker does no authorization of its own.
+- **Platform admin is a global role**; identity (`is_platform_admin`) and bypass are
+  team-agnostic. The platform area is `EnsurePlatformArea` (deny-all
+  `accessPlatformAdmin` gate + request-wide bypass), not an identity check in
+  middleware. The gate is always registered — never `Gate::define` it by hand.
+- **Isolation = `BelongsToTenant`, fail-closed.** `Tenancy::withoutTenant()` /
+  `forTenant()` are the only bypass; never `withoutGlobalScope()` at a call site. Every
+  sessionless entry point (job, command, seeder, webhook, public page) states its tenant
+  context explicitly. `TenantScopedPolicy` stays as defence in depth. Cross-tenant route
+  bindings 404 from the scope; 403 only where the model is reachable (platform area).
+- **A nullable tenant key is a shared pool, not a relaxed scope**: read it through one
+  explicit query under `withoutTenant()` + `whereNull`, "claim" is an Action that sets
+  the key. The scope is never relaxed for `NULL` rows.
+- **Naming**: `Organization` / `organization_id` are the config defaults and the name
+  every app converges on (rename `Company`, `Team`, …). URLs: `/platform/*` platform
+  area, `/admin/*` tenant area, `/candidate/*` where that audience exists, `/settings/*`
+  area-less; route names keep the `admin.{area}.` prefix (`authorization.areas` matches
+  on names). Public slug routes reserve every first segment the router already owns —
+  derive the list from the router, do not hand-maintain it.
+- **Area ≠ tenant.** `CurrentArea` answers "which UI area", `CurrentTenant` "which
+  tenant"; a view-mode switcher sets the area, an organization picker sets the tenant.
+- **The app owns**: the tenant model and its CRUD, the role enum, policies, business
+  invariants (e.g. `throw_if($organization->members()->exists(), …)` in the delete
+  Action). **The package owns the plumbing** — any Spatie/tenancy plumbing you write
+  twice belongs in the package, not in the app.
 
 ---
 
@@ -375,6 +417,16 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
 - A bespoke per-request memo on the user model for a `can()` check (e.g. an
   auth-aware query scope) → use `userCan()`; policies already route through it.
   Invalidate with `forgetUserPermissions()` (or `forgetUserRoles()`).
+- A `users.<tenant>_id` column or a `<tenant>_user` pivot kept in sync with
+  `model_has_roles` by hand → delete it; membership is the role row.
+- Copy-pasted `->when($isPlatformAdmin, fn ($q) => $q->withoutGlobalScope(...))`
+  branches → `EnsurePlatformArea` enters the bypass once per request.
+- The `registrar->teams = false` detach trick → `TenantMembership::removeEverywhere()`.
+- Local role-identity accessors (`isPlatformAdmin`, `holdsPlatformAdminRole()`,
+  `appRoleOrNull()`, `isAdmin` / `isMember`) → `HasAppRole` (`app_role`,
+  `is_platform_admin`).
+- A tenant resolved from "the first `team_id` row" → the package resolver; several
+  memberships without a session choice land on the picker.
 
 ---
 
@@ -390,6 +442,9 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
 - Tenancy is enforced via `ownsModel()` and/or Spatie team-scoped permissions, not
   via a scoped bypass.
 - If teams are off, no team middleware runs; if on, the team id is set per request.
+- With tenancy on: no second membership record exists; every `BelongsToTenant` model
+  passes `assertFailsClosed()`; a user with several memberships and no session choice
+  is redirected to the picker, never 403 and never an arbitrary tenant.
 
 ---
 

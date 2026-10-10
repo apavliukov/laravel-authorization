@@ -8,8 +8,8 @@ use AlexPavliukov\Authorization\AuthorizationServiceProvider;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\EnsurePlatformArea;
 use AlexPavliukov\Authorization\Tenancy\EnsureTenantSelected;
-use AlexPavliukov\Authorization\Tenancy\FromSessionResolver;
 use AlexPavliukov\Authorization\Tenancy\TenantMembership;
+use AlexPavliukov\Authorization\Tenancy\TenantResolver;
 use AlexPavliukov\Authorization\Testing\InteractsWithAuthorization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
@@ -89,12 +89,11 @@ final class LivewirePersistentMiddlewareTest extends TenancyTestCase
     #[Test]
     public function an_organization_component_action_is_refused_once_the_tenant_is_gone(): void
     {
-        config()->set('authorization.tenancy.resolver', 'session');
         $member = User::factory()->create();
         resolve(TenantMembership::class)->add($member, $this->acme, Role::MEMBER);
 
         $page = $this->actingAs($member)
-            ->withSession([FromSessionResolver::sessionKey() => $this->acme->id])
+            ->withSession([TenantResolver::sessionKey() => $this->acme->id])
             ->get('/organization/posts')
             ->assertOk();
 

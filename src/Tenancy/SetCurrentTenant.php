@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization\Tenancy;
 
-use AlexPavliukov\Authorization\Contracts\TenantResolver;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;

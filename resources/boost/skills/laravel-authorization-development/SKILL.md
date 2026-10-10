@@ -200,9 +200,12 @@ artisan authorization:sync --prune     # also delete stale permissions
 ## Tenancy
 
 Config-driven (`config/authorization.php`, publish tag `authorization-config`):
-`tenancy.model` switches it on; the tenant is the Spatie team. `resolver` is `user`
-(column on the user) or `session` (switchable, membership-validated). Everything
-downstream consumes `CurrentTenant` (`Tenancy` facade) and never knows the mode.
+`tenancy.model` switches it on; the tenant is the Spatie team. **Membership = a role
+row in `model_has_roles` with `team_id`, nothing else** — never a tenant column on
+`users` or a pivot. `TenantResolver`: `session_key` (validated against membership;
+global super-admins may enter any existing tenant) → the user's sole tenant → `null`
+(several tenants, no choice ⇒ `EnsureTenantSelected`). Everything downstream consumes
+`CurrentTenant` (`Tenancy` facade).
 
 ```php
 use BelongsToTenant;                                   // scope + autofill + tenant()
@@ -223,17 +226,22 @@ package registers no group middleware itself (a provider push is dropped when th
 configures its groups). Livewire persistent
 middleware is registered automatically when Livewire is present.
 
-**Tenant-level roles are assigned inside the tenant** (`TenantMembership::add`), also in
-`user` mode — a global (`team_id NULL`) role is invisible while a tenant is active. Only
-super-admin roles are global.
+**Tenant-level roles are assigned inside the tenant** (`TenantMembership::add`), also
+when each user has one tenant — a global (`team_id NULL`) role is invisible while a
+tenant is active. Only super-admin roles are global (`TenantMembership::assignGlobal`).
 
 Middleware: `SetCurrentTenant` (priority before `SubstituteBindings`),
 `EnsureTenantSelected` (403 / `missing_tenant_redirect`), `EnsurePlatformArea`
 (`accessPlatformAdmin` deny-all gate + request-wide bypass). Platform admin is a
 **global** role; `RoleBypass` reads the global assignment regardless of the active team.
 
-Membership writes go through `Tenancy\TenantMembership` (`add / changeRole / remove /
-roleFor / isMember`). `Tenancy\CurrentArea` resolves the UI area from route-name
+Membership goes through `Tenancy\TenantMembership` (`add / changeRole / remove /
+roleFor / isMember / assignGlobal / removeEverywhere / tenantIdsOf`). Relations:
+`Tenancy\Concerns\HasMembers` on the tenant (`members()`), `HasTenantMemberships` on
+the user (`tenants()`), both morph relations through `model_has_roles`. Identity:
+`Concerns\HasAppRole` on the user — `$user->app_role` (highest role held anywhere),
+`$user->is_platform_admin` (global super-admin); works without tenancy too. The
+`accessPlatformAdmin` gate is always registered. `Tenancy\CurrentArea` resolves the UI area from route-name
 `Str::is` patterns (`authorization.areas`, default `*platform.*`) — separate from the tenant on purpose.
 
 Tests: `Testing\InteractsWithTenancy` — `actingAsInTenant($user, $tenant, $role)`,
