@@ -119,6 +119,21 @@ final class TenantMiddlewareTest extends TenancyTestCase
     }
 
     #[Test]
+    public function a_membership_whose_tenant_was_deleted_never_activates_it(): void
+    {
+        $user = User::factory()->create();
+        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
+        $this->acme->delete();
+
+        $this->actingAs($user)->get('/tenant')->assertOk()->assertContent('');
+        $this->actingAs($user)
+            ->withSession([TenantResolver::sessionKey() => $this->acme->id])
+            ->get('/tenant')
+            ->assertContent('')
+            ->assertSessionMissing(TenantResolver::sessionKey());
+    }
+
+    #[Test]
     public function ensure_tenant_selected_403s_without_a_tenant(): void
     {
         $this->actingAs(User::factory()->create())->get('/needs-tenant')->assertForbidden();

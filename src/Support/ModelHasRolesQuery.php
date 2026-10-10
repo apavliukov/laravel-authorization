@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use RuntimeException;
+use Spatie\Permission\Guard;
 
 /**
  * Team-aware reads against Spatie's `model_has_roles` pivot, without mutating the
@@ -55,7 +56,7 @@ final class ModelHasRolesQuery
         $query->where($this->morphKey(), $user->getKey())
             ->where('model_type', $user->getMorphClass());
 
-        $this->constrain($query, $roleName, $scope, $teamId);
+        $this->constrain($query, $user, $roleName, $scope, $teamId);
 
         return $query->exists();
     }
@@ -77,7 +78,7 @@ final class ModelHasRolesQuery
                 ->whereColumn($qualifiedMorphKey, $model->getQualifiedKeyName())
                 ->where('model_type', $model->getMorphClass());
 
-            $this->constrain($subQuery, $roleName, $scope, $teamId);
+            $this->constrain($subQuery, $model, $roleName, $scope, $teamId);
         });
     }
 
@@ -129,7 +130,7 @@ final class ModelHasRolesQuery
     public function tenantsOf(Model $user, string $tenantClass): MorphToMany
     {
         return $user->morphToMany($tenantClass, 'model', $this->pivotTable(), $this->morphKey(), $this->teamKey())
-            ->whereIn($this->pivotTable().'.'.$this->roleKey(), $this->guardRoleIds())
+            ->whereIn($this->pivotTable().'.'.$this->roleKey(), $this->guardRoleIds($user))
             ->distinct();
     }
 
@@ -150,7 +151,7 @@ final class ModelHasRolesQuery
         }
 
         return $tenant->morphedByMany($userClass, 'model', $this->pivotTable(), $this->teamKey(), $this->morphKey())
-            ->whereIn($this->pivotTable().'.'.$this->roleKey(), $this->guardRoleIds())
+            ->whereIn($this->pivotTable().'.'.$this->roleKey(), $this->guardRoleIds(new $userClass))
             ->distinct();
     }
 
@@ -186,7 +187,7 @@ final class ModelHasRolesQuery
             ->where($this->morphKey(), $user->getKey())
             ->where('model_type', $user->getMorphClass())
             ->whereNotNull($this->teamKey())
-            ->whereIn($this->roleKey(), $this->guardRoleIds())
+            ->whereIn($this->roleKey(), $this->guardRoleIds($user))
             ->distinct()
             ->pluck($this->teamKey())
             ->all();
@@ -204,7 +205,7 @@ final class ModelHasRolesQuery
             ->join($rolesTable, $rolesTable.'.id', '=', $pivotTable.'.'.$this->roleKey())
             ->where($pivotTable.'.'.$this->morphKey(), $user->getKey())
             ->where($pivotTable.'.model_type', $user->getMorphClass())
-            ->where($rolesTable.'.guard_name', $this->guard());
+            ->where($rolesTable.'.guard_name', $this->guard($user));
 
         if ($teamId === null) {
             $query->whereNull($pivotTable.'.'.$this->teamKey());
@@ -225,9 +226,9 @@ final class ModelHasRolesQuery
         return $user->getMorphClass().'|'.(is_scalar($key) ? (string) $key : '');
     }
 
-    private function constrain(QueryBuilder $query, string $roleName, TeamScope $scope, int|string|null $teamId): void
+    private function constrain(QueryBuilder $query, Model $model, string $roleName, TeamScope $scope, int|string|null $teamId): void
     {
-        $query->whereIn($this->roleKey(), $this->guardRoleIds($roleName));
+        $query->whereIn($this->roleKey(), $this->guardRoleIds($model, $roleName));
 
         if ($scope === TeamScope::Global) {
             $query->whereNull($this->teamKey());
@@ -242,12 +243,12 @@ final class ModelHasRolesQuery
      *
      * @return Closure(QueryBuilder): void
      */
-    private function guardRoleIds(?string $roleName = null): Closure
+    private function guardRoleIds(?Model $model, ?string $roleName = null): Closure
     {
-        return function (QueryBuilder $roles) use ($roleName): void {
+        return function (QueryBuilder $roles) use ($model, $roleName): void {
             $roles->select('id')
                 ->from($this->rolesTable())
-                ->where('guard_name', $this->guard())
+                ->where('guard_name', $this->guard($model))
                 ->when($roleName !== null, static fn (QueryBuilder $q) => $q->where('name', $roleName));
         };
     }
@@ -277,9 +278,10 @@ final class ModelHasRolesQuery
         return $this->config('permission.column_names.role_pivot_key', 'role_id');
     }
 
-    private function guard(): string
+    /** The guard the model's roles live under (Spatie's rule), or the default guard. */
+    private function guard(?Model $model = null): string
     {
-        return $this->config('auth.defaults.guard', 'web');
+        return $model === null ? $this->config('auth.defaults.guard', 'web') : Guard::getDefaultName($model);
     }
 
     private function config(string $key, string $default): string

@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use RuntimeException;
+use Spatie\Permission\PermissionRegistrar;
 
 final class AuthorizationManager
 {
@@ -150,7 +151,7 @@ final class AuthorizationManager
      */
     public function isSuperAdmin(Authenticatable $user): bool
     {
-        if (config('permission.teams') === true) {
+        if (resolve(PermissionRegistrar::class)->teams) {
             return $this->isGlobalSuperAdmin($user);
         }
 

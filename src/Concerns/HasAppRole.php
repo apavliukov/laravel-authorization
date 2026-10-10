@@ -23,7 +23,9 @@ trait HasAppRole
     /** @return Attribute<(AuthorizationRole&\BackedEnum)|null, never> */
     protected function appRole(): Attribute
     {
-        return Attribute::get(fn (): ?AuthorizationRole => resolve(AuthorizationManager::class)->primaryRole($this));
+        // Enum cases are objects: Attribute's object cache would pin the first read for the
+        // instance's lifetime and ignore forgetUserRoles(). The manager memo is the cache.
+        return Attribute::get(fn (): ?AuthorizationRole => resolve(AuthorizationManager::class)->primaryRole($this))->withoutObjectCaching();
     }
 
     /** @return Attribute<bool, never> */

@@ -151,6 +151,9 @@ final class TenantMembershipTest extends TenancyTestCase
         $this->assertSame(Role::ADMIN, $admin->app_role);
         $this->assertFalse($member->is_platform_admin);
         $this->assertSame(Role::ADMIN, $member->app_role);   // highest role held anywhere
+
+        $this->membership->remove($member, $this->globex);
+        $this->assertSame(Role::MEMBER, $member->app_role);   // same instance, no stale attribute cache
     }
 
     #[Test]

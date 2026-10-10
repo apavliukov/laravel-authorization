@@ -17,6 +17,7 @@ use Illuminate\Http\Request;
  *    global super-admin may enter any tenant that exists); a stale key is dropped.
  * 2. Otherwise the user's sole team. Several teams and no session choice ⇒ null —
  *    never an arbitrary first row.
+ * A tenant row that no longer exists is never activated, whichever path found it.
  */
 final readonly class TenantResolver
 {
@@ -46,20 +47,18 @@ final readonly class TenantResolver
 
         $ids = $this->membership->tenantIdsOf($user);
 
-        return count($ids) === 1 ? $ids[0] : null;
+        return count($ids) === 1 && $this->exists($ids[0]) ? $ids[0] : null;
     }
 
     private function mayEnter(Authenticatable $user, int|string $id): bool
     {
-        if ($this->membership->isMember($user, $id)) {
-            return true;
-        }
+        return ($this->membership->isMember($user, $id) || $this->manager->isGlobalSuperAdmin($user)) && $this->exists($id);
+    }
 
-        if (! $this->manager->isGlobalSuperAdmin($user)) {
-            return false;
-        }
-
-        return $this->tenant->modelClass()::query()->withoutGlobalScopes()->whereKey($id)->exists();
+    /** Spatie puts no FK on team_id: a membership may outlive its tenant (soft-deleted ones count as gone). */
+    private function exists(int|string $id): bool
+    {
+        return $this->tenant->modelClass()::query()->whereKey($id)->exists();
     }
 
     public static function sessionKey(): string
