@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.2.1](https://github.com/apavliukov/laravel-authorization/compare/v1.2.0...v1.2.1) (2026-10-10)
+
+### Highlights
+
+Identical to 1.2.0 in code. The `v1.2.0` tag was moved after publication and Packagist, which keeps stable versions immutable, stays pinned to the superseded commit `e8efc0a` — require `^1.2.1` instead.
+
 ## [1.2.0](https://github.com/apavliukov/laravel-authorization/compare/v1.1.1...v1.2.0) (2026-10-10)
 
 ### Highlights
