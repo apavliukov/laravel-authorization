@@ -15,9 +15,11 @@ use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TenancyTestCase;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
+use Spatie\Permission\Models\Role as SpatieRole;
 
 #[Group('tenancy')]
 #[CoversClass(TenantMembership::class)]
@@ -97,6 +99,24 @@ final class TenantMembershipTest extends TenancyTestCase
         $this->membership->remove($user, $this->acme);
         $this->assertSame([$this->globex->id], $this->membership->tenantIdsOf($user));
         $this->assertSame(1, $this->globex->members()->count('users.id'));
+    }
+
+    #[Test]
+    public function a_role_under_another_guard_is_not_a_membership(): void
+    {
+        $user = User::factory()->create();
+        $apiRole = SpatieRole::findOrCreate(Role::MEMBER->value, 'api');
+        DB::table('model_has_roles')->insert([
+            'role_id' => $apiRole->id,
+            'model_type' => $user->getMorphClass(),
+            'model_id' => $user->id,
+            'team_id' => $this->acme->id,
+        ]);
+
+        $this->assertFalse($this->membership->isMember($user, $this->acme));
+        $this->assertSame([], $this->membership->tenantIdsOf($user));
+        $this->assertSame([], $user->tenants()->pluck('id')->all());
+        $this->assertSame([], $this->acme->members()->pluck('id')->all());
     }
 
     #[Test]

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Support;
 
 use BackedEnum;
+use Closure;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
@@ -127,7 +128,9 @@ final class ModelHasRolesQuery
      */
     public function tenantsOf(Model $user, string $tenantClass): MorphToMany
     {
-        return $user->morphToMany($tenantClass, 'model', $this->pivotTable(), $this->morphKey(), $this->teamKey())->distinct();
+        return $user->morphToMany($tenantClass, 'model', $this->pivotTable(), $this->morphKey(), $this->teamKey())
+            ->whereIn($this->pivotTable().'.'.$this->roleKey(), $this->guardRoleIds())
+            ->distinct();
     }
 
     /**
@@ -146,7 +149,9 @@ final class ModelHasRolesQuery
             throw new RuntimeException("No user model behind guard [{$this->guard()}].");
         }
 
-        return $tenant->morphedByMany($userClass, 'model', $this->pivotTable(), $this->teamKey(), $this->morphKey())->distinct();
+        return $tenant->morphedByMany($userClass, 'model', $this->pivotTable(), $this->teamKey(), $this->morphKey())
+            ->whereIn($this->pivotTable().'.'.$this->roleKey(), $this->guardRoleIds())
+            ->distinct();
     }
 
     /**
@@ -181,6 +186,7 @@ final class ModelHasRolesQuery
             ->where($this->morphKey(), $user->getKey())
             ->where('model_type', $user->getMorphClass())
             ->whereNotNull($this->teamKey())
+            ->whereIn($this->roleKey(), $this->guardRoleIds())
             ->distinct()
             ->pluck($this->teamKey())
             ->all();
@@ -221,18 +227,29 @@ final class ModelHasRolesQuery
 
     private function constrain(QueryBuilder $query, string $roleName, TeamScope $scope, int|string|null $teamId): void
     {
-        $query->whereIn($this->roleKey(), function (QueryBuilder $roles) use ($roleName): void {
-            $roles->select('id')
-                ->from($this->rolesTable())
-                ->where('name', $roleName)
-                ->where('guard_name', $this->guard());
-        });
+        $query->whereIn($this->roleKey(), $this->guardRoleIds($roleName));
 
         if ($scope === TeamScope::Global) {
             $query->whereNull($this->teamKey());
         } elseif ($scope === TeamScope::Team) {
             $query->where($this->teamKey(), $teamId);
         }
+    }
+
+    /**
+     * Subquery of role ids under the guard every read here is scoped to — a role
+     * row from another guard is never a membership.
+     *
+     * @return Closure(QueryBuilder): void
+     */
+    private function guardRoleIds(?string $roleName = null): Closure
+    {
+        return function (QueryBuilder $roles) use ($roleName): void {
+            $roles->select('id')
+                ->from($this->rolesTable())
+                ->where('guard_name', $this->guard())
+                ->when($roleName !== null, static fn (QueryBuilder $q) => $q->where('name', $roleName));
+        };
     }
 
     private function pivotTable(): string
