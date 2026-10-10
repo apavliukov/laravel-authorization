@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.2.2](https://github.com/apavliukov/laravel-authorization/compare/v1.2.1...v1.2.2) (2026-10-10)
+
+### Highlights
+
+`$user->app_role` now reflects a role write on the same instance (the attribute no longer caches its first read). Role reads honour the user model's own guard, as Spatie does, so multi-guard apps keep the super-admin bypass without teams. The tenant resolver never activates a tenant whose row was deleted while memberships remained — those requests now resolve to no tenant and a stale session key is dropped. No config or wiring changes.
+
+### Bug Fixes
+
+* **tenancy:** close review findings on the 1.2 membership layer ([4b4a4ad](https://github.com/apavliukov/laravel-authorization/commit/4b4a4ad8678c26571d002b5fd35b1cb52171f204))
+
 ## [1.2.1](https://github.com/apavliukov/laravel-authorization/compare/v1.2.0...v1.2.1) (2026-10-10)
 
 ### Highlights
