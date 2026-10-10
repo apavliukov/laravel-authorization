@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.2.0](https://github.com/apavliukov/laravel-authorization/compare/v1.1.1...v1.2.0) (2026-10-10)
+
+### Highlights
+
+Membership is now a role row in `model_has_roles` with `team_id` and nothing else: drop any `users.<tenant>_id` column or membership pivot. One `Tenancy\TenantResolver` replaces the `user` / `session` modes — session choice validated against membership (global super-admins may enter any existing tenant), else the user's sole tenant, else none; a user with several tenants and no choice gets no tenant, so apps with multi-membership need an organization picker behind `missing_tenant_redirect`. Remove `tenancy.resolver` and `tenancy.user_column` from the published config. New: `HasMembers` (`members()`) / `HasTenantMemberships` (`tenants()`) relations, `HasAppRole` (`app_role`, `is_platform_admin` — also without tenancy), `TenantMembership::assignGlobal / removeEverywhere / tenantIdsOf`, and the `accessPlatformAdmin` gate is registered unconditionally (delete hand-written `Gate::define`s). Every membership read is scoped to the default guard's roles. The tenancy conventions all apps converge on now live in `docs/ADOPTION.md` §3.
+
+### ⚠ BREAKING CHANGES
+
+* **tenancy:** FromUserResolver, FromSessionResolver and
+  Contracts\TenantResolver are removed in favour of Tenancy\TenantResolver;
+  config keys tenancy.resolver and tenancy.user_column are gone (session_key
+  stays). Delete any users.<tenant>_id column or membership pivot and read
+  membership through tenants() / members() / tenantIdsOf().
+
+### Features
+
+* **tenancy:** one membership source — roles in model_has_roles ([1f10940](https://github.com/apavliukov/laravel-authorization/commit/1f1094040284d64e0b85b17d4ba063d3ab588e47))
+
+### Bug Fixes
+
+* **tenancy:** scope membership reads to the default guard ([651e953](https://github.com/apavliukov/laravel-authorization/commit/651e953c388820baaa0be842c471ab09096c4af6))
+
 ## [1.1.1](https://github.com/apavliukov/laravel-authorization/compare/v1.1.0...v1.1.1) (2026-08-24)
 
 ### Highlights
