@@ -13,6 +13,12 @@ enum Role: string implements AuthorizationRole
     case EDITOR = 'editor';
     case OWNER = 'owner';
 
+    /** Deliberately not declaration order, so tests prove the list wins. */
+    public static function byPriority(): array
+    {
+        return [self::ADMIN, self::OWNER, self::EDITOR, self::MEMBER];
+    }
+
     public function isSuperAdmin(): bool
     {
         return $this === self::ADMIN;

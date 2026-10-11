@@ -80,7 +80,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
 ### 2. Implement the role enum
 
 Your role enum implements `AuthorizationRole`. `isSuperAdmin()` drives the bypass;
-`permissions()` is consumed by the seeder to grant per-role permissions.
+`permissions()` is consumed by the seeder to grant per-role permissions;
+`byPriority()` ranks the cases for [`primaryRole()`](#primary-role-for-routing) and
+must list every case exactly once — `authorization:sync` and the seeder throw
+otherwise.
 
 ```php
 use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
@@ -89,6 +92,12 @@ enum Role: string implements AuthorizationRole
 {
     case ADMIN = 'admin';
     case MEMBER = 'member';
+
+    /** @return list<self> */
+    public static function byPriority(): array
+    {
+        return [self::ADMIN, self::MEMBER];
+    }
 
     public function isSuperAdmin(): bool
     {
@@ -259,10 +268,15 @@ public function permissions(): array
 
 ### Primary role for routing
 
-`Authorization::primaryRole($user)` returns the highest-priority role the user
-holds — the first matching case in the enum's declaration order — using
-team-agnostic identity, so it suits login redirects and "home" links regardless of
-the active team:
+`Authorization::primaryRole($user)` (and `$user->app_role`) returns the
+highest-priority role the user holds — the first case in the enum's `byPriority()`
+that the user holds globally or in any team — so it suits login redirects and "home"
+links regardless of the active team. Declaration order plays no part.
+
+The order is a product decision, not a permission count: it answers "which area does
+a user with several roles land in". An app where a candidate who is also an
+organization admin must land in the candidate area lists `CANDIDATE` before
+`ORGANIZATION_ADMIN`, although the admin holds more permissions.
 
 ```php
 $role = Authorization::primaryRole($user) ?? Role::default();

@@ -6,7 +6,9 @@ namespace AlexPavliukov\Authorization\Database;
 
 use AlexPavliukov\Authorization\AuthorizationManager;
 use AlexPavliukov\Authorization\PermissionRegistry;
+use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
+use LogicException;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -80,6 +82,8 @@ final readonly class PermissionSync
      */
     public function apply(bool $prune = false): void
     {
+        $this->assertPriorityIsComplete();
+
         $this->permissions();
 
         if ($prune) {
@@ -87,6 +91,31 @@ final readonly class PermissionSync
         }
 
         $this->roles();
+    }
+
+    /**
+     * byPriority() must list every role case exactly once. Checked here, on the
+     * deploy path, rather than at boot, which stays config-only.
+     */
+    private function assertPriorityIsComplete(): void
+    {
+        $roleEnum = $this->manager->roleEnum();
+        $declared = array_map(static fn (BackedEnum $role): string => (string) $role->value, $roleEnum::cases());
+        $ranked = array_map(static fn (BackedEnum $role): string => (string) $role->value, $roleEnum::byPriority());
+
+        $missing = array_diff($declared, $ranked);
+        $duplicated = array_keys(array_filter(array_count_values($ranked), static fn (int $count): bool => $count > 1));
+
+        if ($missing === [] && $duplicated === []) {
+            return;
+        }
+
+        throw new LogicException(sprintf(
+            '%s::byPriority() must list every case exactly once. Missing: [%s]. Duplicated: [%s].',
+            $roleEnum,
+            implode(', ', $missing),
+            implode(', ', $duplicated),
+        ));
     }
 
     private function prunePermissions(): void

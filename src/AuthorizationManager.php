@@ -271,15 +271,15 @@ final class AuthorizationManager
     }
 
     /**
-     * The highest-priority role the user holds, by the role enum's declaration
-     * order — the first case the user holds wins. Uses team-agnostic identity, so
+     * The highest-priority role the user holds, by the role enum's byPriority()
+     * list — the first case the user holds wins. Uses team-agnostic identity, so
      * it suits routing/landing regardless of the active team. Null if none.
      *
      * @return (AuthorizationRole&BackedEnum)|null
      */
     public function primaryRole(Authenticatable $user): ?AuthorizationRole
     {
-        foreach ($this->roleEnum()::cases() as $role) {
+        foreach ($this->roleEnum()::byPriority() as $role) {
             if ($this->userHasRole($user, $role)) {
                 return $role;
             }

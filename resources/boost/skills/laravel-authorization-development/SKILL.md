@@ -125,9 +125,12 @@ override `tenantKey(Model $model)` when the tenant is reached through a relation
 
 Role enum implements `AlexPavliukov\Authorization\Contracts\AuthorizationRole`:
 `label()`, `isSuperAdmin()`, `permissions()`. Keep `match($this)` arms exhaustive (no
-`default`) — forgetting a case throws `UnhandledMatchError` at seed time. **Order cases
-from most to least privileged** — `Authorization::primaryRole()` returns the first case
-the user holds.
+`default`) — forgetting a case throws `UnhandledMatchError` at seed time. **Add the new
+case to `byPriority()`** — `Authorization::primaryRole()` / `$user->app_role` return the
+first case there the user holds; declaration order is ignored, and sync throws a
+`LogicException` if a case is missing or repeated. The order is a product decision, not
+a permission count (oohire: `CANDIDATE` before `ORGANIZATION_ADMIN`, so an admin who is
+also a candidate lands in the candidate area).
 
 Build permission sets with the `Permissions` builder, never hand-written strings:
 
@@ -276,7 +279,7 @@ Authorization::userRolesInTeam($user, $teamId);
 Authorization::withTeam($teamId, fn () => $user->can(Ability::UPDATE, $post));  // restored even on throw
 ```
 
-`Authorization::primaryRole($user)` — highest-priority role by enum declaration order,
+`Authorization::primaryRole($user)` — first role in the enum's `byPriority()` the user holds,
 team-agnostic; suits landing/redirect decisions.
 
 ### Request memoization

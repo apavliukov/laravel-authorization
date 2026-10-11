@@ -18,14 +18,14 @@ use PHPUnit\Framework\Attributes\Test;
 final class PrimaryRoleTest extends TestCase
 {
     #[Test]
-    public function it_returns_the_highest_priority_role_by_declaration_order(): void
+    public function it_follows_by_priority_not_declaration_order(): void
     {
         $user = User::factory()->create();
-        $user->assignRole(Role::EDITOR->value);
         $user->assignRole(Role::MEMBER->value);
+        $user->assignRole(Role::EDITOR->value);
 
-        // Role cases are declared ADMIN, MEMBER, EDITOR — MEMBER outranks EDITOR.
-        $this->assertSame(Role::MEMBER, Authorization::primaryRole($user));
+        // MEMBER is declared before EDITOR, but byPriority() ranks EDITOR higher.
+        $this->assertSame(Role::EDITOR, Authorization::primaryRole($user));
     }
 
     #[Test]

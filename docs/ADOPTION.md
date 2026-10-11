@@ -107,7 +107,7 @@ Resolution order for any `can()` / `authorize()` / `@can`:
 | Symbol | Kind | Use |
 |---|---|---|
 | `Authorization` (facade) | facade | `useRoleEnum()`, `authorizableModels()`, `bypassUsing()`, `resolveTeamsUsing()` |
-| `Contracts\AuthorizationRole` | interface | implemented by the app's role enum: `isSuperAdmin(): bool`, `permissions(): string[]` |
+| `Contracts\AuthorizationRole` | interface | implemented by the app's role enum: `isSuperAdmin(): bool`, `permissions(): string[]`, static `byPriority(): list<self>` |
 | `Contracts\BypassStrategy` | interface | `shouldBypass(Authenticatable $user, string $ability): bool` |
 | `Contracts\TeamResolver` | interface | `resolve(Request): int\|string\|null` |
 | `AbstractPolicy` | abstract | extend per model; implement `getModelClass()`; override `ownsModel()` for tenancy |
@@ -126,7 +126,7 @@ Resolution order for any `can()` / `authorize()` / `@can`:
 | `Testing\InteractsWithAuthorization` | trait | test primitives for team-aware role state |
 | `TenantScopedPolicy` | abstract | attribute-tenancy base; `resolveTenantUsing()` + `tenantColumn()` declare tenant + owning column, override `tenantKey()` for relations |
 | `Support\Permissions` | builder | fluent `make()->for()->only()->forAll()->all()` for `AuthorizationRole::permissions()` |
-| `primaryRole()` (facade) | facade | highest-priority role the user holds (enum declaration order), for routing |
+| `primaryRole()` (facade) | facade | highest-priority role the user holds (first held case in `byPriority()`), for routing |
 | `systemAbilities()` (facade) | facade | register deny-by-default gates for an app system-ability enum |
 | `make:authorization-policy {Model}` | command | scaffolds a policy |
 
@@ -294,8 +294,12 @@ Adapt to the project; the order is a guide, not a script.
 3. **Rewrite namespaces** of the kept code that referenced the old core →
    `AlexPavliukov\Authorization\...` (policies' `extends`, `Ability` imports,
    `HasPolicy` import, blade `@can` unaffected).
-4. **Role enum** `implements AuthorizationRole`: add `isSuperAdmin()` and
-   `permissions(): string[]`. Move presentation (`label()`, `color()`, …) to an
+4. **Role enum** `implements AuthorizationRole`: add `isSuperAdmin()`,
+   `permissions(): string[]` and static `byPriority()` — every case exactly once,
+   highest priority first (sync throws otherwise). The order is a product decision,
+   not a permission count: write down the order the app relies on today (e.g. oohire
+   lists `CANDIDATE` before `ORGANIZATION_ADMIN` so an admin who is also a candidate
+   lands in the candidate area). Move presentation (`label()`, `color()`, …) to an
    app-only trait/concern — it must not be in the auth contract.
 5. **User model**: `use Spatie\Permission\Traits\HasRoles;` and
    `use AlexPavliukov\Authorization\Concerns\HasPolicy;`.
@@ -381,8 +385,8 @@ Authorization::systemAbilities(SystemAbility::class);   // gates wired; use @can
 ```
 
 **Primary role for routing** — replace a hand-rolled "highest-priority role" loop
-with `Authorization::primaryRole($user)` (first held case in enum declaration
-order, team-agnostic); the landing/priority stay on the enum:
+with `Authorization::primaryRole($user)` (first held case in `byPriority()`,
+team-agnostic); the landing/priority stay on the enum:
 
 ```php
 $role = Authorization::primaryRole($user) ?? Role::default();
@@ -521,6 +525,8 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
 - With tenancy on: no second membership record exists; every `BelongsToTenant` model
   passes `assertFailsClosed()`; a user with several memberships and no session choice
   is redirected to the picker, never 403 and never an arbitrary tenant.
+- The role enum's `byPriority()` lists every case exactly once, in the order the
+  product wants (`authorization:sync` passes).
 - With ownership on: every tenant has an `owner_id` and its owner role row, and
   `authorization:repair-ownership` reports `0 created, 0 removed`.
 

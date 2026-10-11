@@ -15,4 +15,13 @@ interface AuthorizationRole
      * @return array<int, string>
      */
     public function permissions(): array;
+
+    /**
+     * Every case, highest priority first. primaryRole() / $user->app_role return the
+     * first role here the user holds anywhere; order is a product decision, not a
+     * permission count.
+     *
+     * @return list<static>
+     */
+    public static function byPriority(): array;
 }

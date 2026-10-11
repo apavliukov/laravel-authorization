@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization\Tests\Feature;
 
+use AlexPavliukov\Authorization\Authorization;
 use AlexPavliukov\Authorization\Database\AuthorizationSeeder;
 use AlexPavliukov\Authorization\Database\PermissionSync;
+use AlexPavliukov\Authorization\Tests\Fixtures\IncompletePriorityRole;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\TestCase;
+use LogicException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
@@ -52,6 +55,22 @@ final class PermissionSyncTest extends TestCase
 
         $this->assertSame(7, Permission::query()->count());
         $this->assertSame(count(Role::cases()), SpatieRole::query()->count());
+    }
+
+    #[Test]
+    public function apply_refuses_a_priority_list_that_misses_or_repeats_cases(): void
+    {
+        Authorization::useRoleEnum(IncompletePriorityRole::class);
+
+        try {
+            resolve(PermissionSync::class)->apply();
+            $this->fail('Expected a LogicException.');
+        } catch (LogicException $e) {
+            $this->assertStringContainsString('Missing: [second, third]', $e->getMessage());
+            $this->assertStringContainsString('Duplicated: [first]', $e->getMessage());
+        }
+
+        $this->assertSame(0, Permission::query()->count());
     }
 
     #[Test]
