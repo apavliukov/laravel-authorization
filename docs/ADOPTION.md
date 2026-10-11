@@ -237,6 +237,13 @@ oohire, lead-crm); treat divergences as things to fix.
   another tenant (global roles don't count). Default `multiple`.
 - Apps surface both exceptions (they extend `DomainException`) as a toast / form error
   and disable the owner's "remove" / "delete" buttons.
+- **Who may transfer ownership is an ordinary permission.** The owner role is a regular
+  role whose `permissions()` the app enumerates (typically the admin set plus a custom
+  ability on the tenant model, e.g. `transferOwnership`); only the owner role gets that
+  ability, so an admin is denied like any user without a permission. The package ships
+  no owner gate and no owner bypass. `TenantMembership::transferOwnership()` is plumbing
+  and does not authorize — the app's action calls `authorize()` first; the method itself
+  still refuses a deleted new owner, a second tenant under `single`, and races.
 
 Migration recipe for an app:
 
