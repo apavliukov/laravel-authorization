@@ -92,6 +92,58 @@ final class OwnershipTest extends OwnershipTestCase
     }
 
     #[Test]
+    public function guards_read_the_owner_from_the_database_not_a_partial_model(): void
+    {
+        $partial = Organization::query()->select(['id', 'name'])->findOrFail($this->acme->id);
+
+        $this->assertThrows(fn () => $this->membership->remove($this->owner, $partial), OwnershipException::class);
+        $this->assertThrows(fn () => $this->membership->changeRole($this->owner, $partial, Role::EDITOR), OwnershipException::class);
+        $this->assertTrue($this->membership->isOwner($this->owner, $partial));
+    }
+
+    #[Test]
+    public function transfer_demotes_the_current_owner_even_from_a_stale_model(): void
+    {
+        $stale = Organization::query()->findOrFail($this->acme->id);
+        $second = User::factory()->create();
+        $third = User::factory()->create();
+        $this->membership->transferOwnership($this->acme, $second);
+
+        $this->membership->transferOwnership($stale, $third);   // $stale still says the first owner
+
+        $this->assertSame([], $this->rolesIn($second));
+        $this->assertSame([Role::OWNER->value], $this->rolesIn($third));
+        $this->assertSame(1, DB::table('model_has_roles')->where('team_id', $this->acme->id)->count());
+    }
+
+    #[Test]
+    public function transfer_back_to_the_owner_a_stale_model_still_shows_writes_the_column(): void
+    {
+        $stale = Organization::query()->findOrFail($this->acme->id);   // owner_id = first owner
+        $second = User::factory()->create();
+        $this->membership->transferOwnership($this->acme, $second);
+
+        $this->membership->transferOwnership($stale, $this->owner);
+
+        $this->assertSame($this->owner->id, $this->acme->fresh()?->owner_id);
+        $this->assertSame([], $this->rolesIn($second));
+    }
+
+    #[Test]
+    public function transfer_fires_the_tenant_model_events(): void
+    {
+        $updated = [];
+        Organization::updated(static function (Organization $organization) use (&$updated): void {
+            $updated[] = $organization->owner_id;
+        });
+        $next = User::factory()->create();
+
+        $this->membership->transferOwnership($this->acme, $next);
+
+        $this->assertSame([$next->id], $updated);
+    }
+
+    #[Test]
     public function demoting_to_the_owner_role_is_refused(): void
     {
         $this->expectException(OwnershipException::class);

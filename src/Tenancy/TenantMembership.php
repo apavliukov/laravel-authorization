@@ -11,7 +11,6 @@ use BackedEnum;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use InvalidArgumentException;
-use Throwable;
 
 /**
  * Membership = a Spatie role held within the tenant's team — the only record of
@@ -132,13 +131,18 @@ final readonly class TenantMembership
         $this->guardSingleMembership($newOwner, $teamId);
 
         $newId = self::userKey($newOwner);
-        $previousId = ScalarKey::normalize($tenant->getAttribute($ownerKey));
-        $previous = ScalarKey::same($previousId, $newId) ? null : $this->findUser($previousId);
+        $previous = null;
 
         try {
-            $tenant->getConnection()->transaction(function () use ($tenant, $ownerKey, $ownerRole, $teamId, $newOwner, $newId, $previous, $demoteRole): void {
-                $tenant->setAttribute($ownerKey, $newId);
-                $tenant->save();
+            $tenant->getConnection()->transaction(function () use ($ownerKey, $ownerRole, $teamId, $newOwner, $newId, $demoteRole, &$previous): void {
+                // A fresh locked row, not the passed model (stale or partial): two concurrent
+                // transfers can't demote the same previous owner, and save() still fires model events.
+                $locked = $this->tenancy->modelClass()::query()->withoutGlobalScopes()->lockForUpdate()->findOrFail($teamId);
+                $previousId = ScalarKey::normalize($locked->getAttribute($ownerKey));
+                $previous = ScalarKey::same($previousId, $newId) ? null : $this->findUser($previousId);
+
+                $locked->setAttribute($ownerKey, $newId);
+                $locked->save();
 
                 $this->manager->withTeam($teamId, static function () use ($newOwner, $ownerRole, $previous, $demoteRole): void {
                     /** @phpstan-ignore method.notFound (the package requires the user to use Spatie\Permission\Traits\HasRoles) */
@@ -147,11 +151,9 @@ final readonly class TenantMembership
                     $previous?->syncRoles($demoteRole === null ? [] : [$demoteRole]);
                 });
             });
-        } catch (Throwable $e) {
-            $tenant->setAttribute($ownerKey, $previousId);
-            $tenant->syncOriginalAttribute($ownerKey);
 
-            throw $e;
+            $tenant->setAttribute($ownerKey, $newId);
+            $tenant->syncOriginalAttribute($ownerKey);
         } finally {
             $this->manager->forgetUserRoles($newOwner);
 
@@ -164,7 +166,7 @@ final readonly class TenantMembership
     /** The owning user, read through the `owner_key` column. */
     public function ownerOf(Model $tenant): ?Authenticatable
     {
-        return $this->findUser(ScalarKey::normalize($tenant->getAttribute($this->tenancy->requireOwnership()[0])));
+        return $this->findUser($this->ownerIdOf(self::key($tenant), $this->tenancy->requireOwnership()[0]));
     }
 
     /** Whether the user is the tenant's owner by the `owner_key` column (false while ownership is off). */
@@ -176,11 +178,7 @@ final readonly class TenantMembership
             return false;
         }
 
-        $ownerId = $tenant instanceof Model
-            ? $tenant->getAttribute($ownerKey)
-            : $this->tenancy->modelClass()::query()->withoutGlobalScopes()->whereKey($tenant)->value($ownerKey);
-
-        return ScalarKey::same(ScalarKey::normalize($ownerId), self::userKey($user));
+        return ScalarKey::same($this->ownerIdOf(self::key($tenant), $ownerKey), self::userKey($user));
     }
 
     /** Whether the user owns any tenant, archived ones included (false while ownership is off). */
@@ -221,6 +219,15 @@ final readonly class TenantMembership
                 throw MembershipPolicyException::singleMembership();
             }
         }
+    }
+
+    /**
+     * The owner id as stored — never the passed model's attribute, which may be
+     * stale or not selected at all.
+     */
+    private function ownerIdOf(int|string $teamId, string $ownerKey): int|string|null
+    {
+        return ScalarKey::normalize($this->tenancy->modelClass()::query()->withoutGlobalScopes()->whereKey($teamId)->value($ownerKey));
     }
 
     /** Scopes off: an owner is never soft-deleted, and a stale id must not silently skip a demotion. */
