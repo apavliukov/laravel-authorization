@@ -45,6 +45,12 @@ abstract class TenancyTestCase extends TeamsTestCase
         Schema::create('organizations', static function (Blueprint $table): void {
             $table->id();
             $table->string('name');
+            $table->unsignedBigInteger('owner_id')->nullable();
+            $table->softDeletes();
+        });
+
+        Schema::table('users', static function (Blueprint $table): void {
+            $table->softDeletes();
         });
 
         Schema::create('posts', static function (Blueprint $table): void {

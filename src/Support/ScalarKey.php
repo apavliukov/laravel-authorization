@@ -14,4 +14,10 @@ final class ScalarKey
     {
         return is_int($value) || is_string($value) ? $value : null;
     }
+
+    /** Key equality across int/string (`5` from a column vs `'5'` from a route). */
+    public static function same(int|string|null $a, int|string|null $b): bool
+    {
+        return $a !== null && $b !== null && (string) $a === (string) $b;
+    }
 }

@@ -32,7 +32,8 @@ decide each one explicitly before refactoring:
    another model override `tenantRelationPath()`. Wire `SetCurrentTenant` explicitly
    in `bootstrap/app.php` (`->web(append:)`), and assign every tenant-level role
    *inside* the tenant (`TenantMembership`) — a global role is invisible while a
-   tenant is active. See README "Tenancy".
+   tenant is active. Decide `tenancy.owner_role` (who owns a tenant, see §3
+   "Ownership") and `tenancy.memberships` (`multiple` / `single`). See README "Tenancy".
 2. **Spatie teams: on or off?** With tenancy on, teams are **on** and the tenant is
    the team — no choice. Without tenancy, turn teams on only if you need
    team-scoped role assignments. **Platform-level (global) roles under teams** are
@@ -86,7 +87,7 @@ Teams (optional)     DefaultTeamResolver | CallbackTeamResolver + SetPermissions
 Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam / primaryRole / userCan (memoized, request-scoped) + HasTeamAwareRoles query scopes
 Testing\InteractsWithAuthorization   test primitives (assignRoleInTeam / withPermissionsTeam / roleModelId / resetPermissionsTeam)
 Tenancy (config-driven)   CurrentTenant (+ Tenancy facade) | BelongsToTenant + TenantScope (fail-closed) | TenantResolver (session → sole tenant → none)
-                          SetCurrentTenant / EnsureTenantSelected / EnsurePlatformArea | TenantMembership (add/changeRole/remove/assignGlobal/removeEverywhere/tenantIdsOf) | CurrentArea
+                          SetCurrentTenant / EnsureTenantSelected / EnsurePlatformArea | TenantMembership (add/changeRole/remove/assignGlobal/removeGlobal/transferOwnership/tenantIdsOf) | CurrentArea
                           Concerns\HasMembers (tenant) / Concerns\HasTenantMemberships (user) — relations through model_has_roles
 Concerns\HasAppRole      $user->app_role / $user->is_platform_admin (team-agnostic identity; also without tenancy)
 Testing\InteractsWithTenancy   actingAsInTenant / withoutTenant / forTenant / assertFailsClosed
@@ -173,7 +174,9 @@ oohire, lead-crm); treat divergences as things to fix.
   `users.<tenant>_id`, no membership pivot, no JSON. A user may hold roles in any
   number of tenants plus global roles (`team_id NULL`); "one role per user" is not a
   rule. Reads: `tenants()` / `members()` / `TenantMembership::tenantIdsOf()`. Writes:
-  `TenantMembership` only (`add / changeRole / remove / assignGlobal / removeEverywhere`).
+  `TenantMembership` only (`add / changeRole / remove / assignGlobal / removeGlobal /
+  transferOwnership`). Memberships are removed one tenant at a time — there is no
+  "detach everywhere".
 - **One resolver**: session choice (validated against membership; a global super-admin
   may enter any existing tenant) → the user's sole tenant → none. Several tenants and
   no choice ⇒ no tenant, never an arbitrary row. An app with multi-membership therefore
@@ -200,9 +203,73 @@ oohire, lead-crm); treat divergences as things to fix.
 - **Area ≠ tenant.** `CurrentArea` answers "which UI area", `CurrentTenant` "which
   tenant"; a view-mode switcher sets the area, an organization picker sets the tenant.
 - **The app owns**: the tenant model and its CRUD, the role enum, policies, business
-  invariants (e.g. `throw_if($organization->members()->exists(), …)` in the delete
-  Action). **The package owns the plumbing** — any Spatie/tenancy plumbing you write
+  invariants, and what happens to a deleted tenant's child records. **Tenants are
+  archived (soft delete)**, not hard-deleted: members lose access through the resolver,
+  which treats a soft-deleted tenant as gone. This supersedes the earlier
+  `throw_if($organization->members()->exists(), …)` delete guard. **The package owns the plumbing** — any Spatie/tenancy plumbing you write
   twice belongs in the package, not in the app.
+- **UI split** (starter reference): the user form edits identity plus the global
+  platform role; memberships and their roles are managed on the tenant
+  (`OrganizationMemberList`; `AddOrganizationMember` = `TenantMembership::changeRole`, so
+  re-adding changes the role; `RemoveOrganizationMember`). No membership repeater on
+  the user form — saving a user must never touch memberships.
+
+### Ownership (1.3)
+
+- **`<tenant>.owner_id` is the only record of ownership** — `NOT NULL`, FK → users,
+  `restrictOnDelete`, in the app's migration. Turn the feature on with
+  `tenancy.owner_role => Role::OWNER` (`owner_key` defaults to `owner_id`). While
+  `owner_role` is null, ownership is inert — a 1.2 app keeps working unchanged.
+- **The owner's role row is derived**: the package writes it together with the column
+  (`TenantMembership::transferOwnership($tenant, $newOwner, $demoteTo = null)`, also
+  right after creating a tenant with `owner_id` set). `add / changeRole / remove` on the
+  owner, and handing the owner role to anyone else, throw `Tenancy\OwnershipException`.
+- **The column never grants access.** Policies, the resolver and `members()` read roles
+  only; a missing owner row means no access until the repair runs.
+- **An owner cannot be deleted**: the FK stops a hard delete, a package `deleting`
+  listener on the user model stops soft and hard Eloquent deletes (archived tenants
+  count). A soft delete through the query builder (`User::query()->delete()`) bypasses
+  it — don't.
+- **Self-healing**: `AuthorizationSeeder` (and `authorization:repair-ownership`) re-derive
+  every tenant's owner row from `owner_id` and drop any other owner-role row in the team.
+- **`tenancy.memberships => 'single'`** makes `add / changeRole / transferOwnership`
+  throw `Tenancy\MembershipPolicyException` for a user who already holds a role in
+  another tenant (global roles don't count). Default `multiple`.
+- Apps surface both exceptions (they extend `DomainException`) as a toast / form error
+  and disable the owner's "remove" / "delete" buttons.
+
+Migration recipe for an app:
+
+```php
+Schema::table('organizations', function (Blueprint $table) {
+    $table->foreignId('owner_id')->nullable()->constrained('users')->restrictOnDelete();
+});
+
+// Coming from 1.2 (owner = the OWNER role row): verify, backfill, then tighten.
+$owners = DB::table('model_has_roles')
+    ->join('roles', 'roles.id', '=', 'model_has_roles.role_id')
+    ->where('roles.name', Role::OWNER->value)
+    ->where('roles.guard_name', 'web')
+    ->where('model_has_roles.model_type', (new User)->getMorphClass())
+    ->whereNotNull('model_has_roles.team_id')
+    ->select('model_has_roles.team_id', 'model_has_roles.model_id');
+
+// Every organization (archived ones too) must have exactly one owner row — fix the
+// data by hand before migrating; never let the migration pick one for you.
+$broken = DB::table('organizations')
+    ->leftJoinSub($owners, 'owners', 'owners.team_id', '=', 'organizations.id')
+    ->groupBy('organizations.id')
+    ->havingRaw('count(owners.model_id) <> 1')
+    ->pluck('organizations.id');
+
+throw_if($broken->isNotEmpty(), RuntimeException::class, 'Organizations without exactly one owner: '.$broken->implode(', '));
+
+$owners->pluck('model_id', 'team_id')->each(
+    fn ($userId, $organizationId) => DB::table('organizations')->where('id', $organizationId)->update(['owner_id' => $userId]),
+);
+
+Schema::table('organizations', fn (Blueprint $table) => $table->foreignId('owner_id')->nullable(false)->change());
+```
 
 ---
 
@@ -421,7 +488,9 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
   `model_has_roles` by hand → delete it; membership is the role row.
 - Copy-pasted `->when($isPlatformAdmin, fn ($q) => $q->withoutGlobalScope(...))`
   branches → `EnsurePlatformArea` enters the bypass once per request.
-- The `registrar->teams = false` detach trick → `TenantMembership::removeEverywhere()`.
+- The `registrar->teams = false` detach trick → `TenantMembership::remove()` per tenant,
+  `removeGlobal()` for platform roles.
+- Hand-written "the owner cannot be removed / deleted" checks → `OwnershipException`.
 - Local role-identity accessors (`isPlatformAdmin`, `holdsPlatformAdminRole()`,
   `appRoleOrNull()`, `isAdmin` / `isMember`) → `HasAppRole` (`app_role`,
   `is_platform_admin`).
@@ -445,6 +514,8 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
 - With tenancy on: no second membership record exists; every `BelongsToTenant` model
   passes `assertFailsClosed()`; a user with several memberships and no session choice
   is redirected to the picker, never 403 and never an arbitrary tenant.
+- With ownership on: every tenant has an `owner_id` and its owner role row, and
+  `authorization:repair-ownership` reports `0 created, 0 removed`.
 
 ---
 

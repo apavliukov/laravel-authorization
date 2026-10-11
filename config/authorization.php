@@ -33,6 +33,19 @@ return [
 
         // Route name EnsureTenantSelected redirects to when no tenant is active.
         'missing_tenant_redirect' => null,
+
+        // Column on the tenant table naming the owning user — the only record of
+        // ownership (the app's migration: NOT NULL, FK users, restrictOnDelete).
+        'owner_key' => 'owner_id',
+
+        // Role the owner holds in the tenant's team, written only by the package
+        // together with owner_key. A role enum case or its value. null ⇒ ownership
+        // is off: no guards, no repair, no delete listener.
+        'owner_role' => null,   // App\Enums\Role::OWNER
+
+        // 'multiple': a user may hold roles in several tenants. 'single':
+        // add() / changeRole() / transferOwnership() refuse a second tenant.
+        'memberships' => 'multiple',
     ],
 
     /*

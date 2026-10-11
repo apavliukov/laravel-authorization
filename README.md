@@ -382,9 +382,7 @@ $user->app_role;                 // highest-priority role held anywhere (enum ca
 $user->is_platform_admin;        // global super-admin (team-agnostic)
 ```
 
-Writes go through `TenantMembership`: `add / changeRole / remove` inside a tenant,
-`assignGlobal($user, $role)` for platform roles, `removeEverywhere($user)` to detach
-across every tenant and globally, `tenantIdsOf($user)` for the memoized id list.
+Writes go through `TenantMembership` (see [Membership](#membership)).
 
 ### Wiring the middleware
 
@@ -415,7 +413,7 @@ persistent list, include these three.
 
 With tenancy on, Spatie answers `hasRole()` / `can()` against the **active team**.
 So every tenant-level role (owner, member, editor …) must be assigned *within* the
-tenant — `TenantMembership::add($user, $tenant, Role::OWNER)` — also when each user
+tenant — `TenantMembership::add($user, $tenant, Role::ADMIN)` — also when each user
 has exactly one tenant. A role assigned globally (`team_id IS NULL`) is invisible
 while a tenant is active; only super-admin roles belong there
 (`TenantMembership::assignGlobal($user, Role::PLATFORM_ADMIN)`). Seeders and
@@ -498,6 +496,42 @@ $membership->isMember($user, $organization);
 
 Writes run under the target team, restore the active one, and flush the memoized
 role reads.
+
+`assignGlobal / removeGlobal($user, $role)` handle platform roles; `tenantIdsOf($user)`
+returns the memoized id list. `tenancy.memberships => 'single'` makes `add` / `changeRole`
+/ `transferOwnership` throw `Tenancy\MembershipPolicyException` for a user who already
+holds a role in another tenant (global roles don't count; default `multiple`).
+
+**Ownership** (on when `tenancy.owner_role` is set): the tenant's `owner_key` column
+(default `owner_id`; the app's migration — `NOT NULL`, FK users, `restrictOnDelete`)
+is the only record of who owns it. The owner's role row is derived and written only
+together with the column:
+
+```php
+'tenancy' => [
+    'owner_key' => 'owner_id',
+    'owner_role' => Role::OWNER,
+    'memberships' => 'multiple',   // or 'single'
+],
+
+$organization = Organization::create(['name' => 'Acme', 'owner_id' => $user->id]);
+$membership->transferOwnership($organization, $user);          // writes the owner row; idempotent
+$membership->transferOwnership($organization, $next, Role::ADMIN); // previous owner demoted (or dropped when null)
+$membership->ownerOf($organization);   // via the column
+$membership->isOwner($user, $organization);
+$organization->owner();                // BelongsTo (HasMembers)
+```
+
+- `add / changeRole / remove` on the owner, and granting the owner role to anyone,
+  throw `Tenancy\OwnershipException` (a `DomainException`) — transfer ownership instead.
+- Deleting a user who owns a tenant (archived ones included) throws
+  `OwnershipException` from a `deleting` listener — soft and hard Eloquent deletes
+  alike; query-builder deletes bypass it.
+- The column never grants access: policies, the resolver and `members()` read roles only.
+- `AuthorizationSeeder` re-derives every owner row from the column and removes any other
+  owner-role row in the team (`authorization:repair-ownership` runs it ad hoc). Tenants
+  with a `NULL` owner are skipped; a missing column is reported and skipped instead of failing.
+- The package never deletes tenants or cascades — archive (soft delete) them.
 
 ### Areas
 

@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization\Tenancy;
 
+use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
 use AlexPavliukov\Authorization\Support\ScalarKey;
+use BackedEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Context;
+use LogicException;
 use RuntimeException;
 
 /**
@@ -45,6 +48,51 @@ final class CurrentTenant
         $key = config('authorization.tenancy.foreign_key', 'organization_id');
 
         return is_string($key) ? $key : 'organization_id';
+    }
+
+    /** The tenant column naming its owner, or null while ownership is off — the one "is it on" check. */
+    public function ownerKey(): ?string
+    {
+        $key = config('authorization.tenancy.owner_key');
+
+        return $this->isConfigured() && $this->ownerRole() !== null && is_string($key) ? $key : null;
+    }
+
+    /** @return array{0: string, 1: string} owner key and owner role */
+    public function requireOwnership(): array
+    {
+        $ownerKey = $this->ownerKey();
+        $ownerRole = $this->ownerRole();
+
+        if ($ownerKey === null || $ownerRole === null) {
+            throw new LogicException('Tenant ownership is off. Set authorization.tenancy.owner_role.');
+        }
+
+        return [$ownerKey, $ownerRole];
+    }
+
+    /** The role name the owner holds in the tenant's team, or null while ownership is off. */
+    public function ownerRole(): ?string
+    {
+        $role = config('authorization.tenancy.owner_role');
+
+        return $role instanceof BackedEnum || is_string($role) ? ModelHasRolesQuery::roleName($role) : null;
+    }
+
+    public function singleMembership(): bool
+    {
+        return config('authorization.tenancy.memberships') === 'single';
+    }
+
+    public function assertValidConfig(): void
+    {
+        if ($this->ownerRole() !== null && ! is_string(config('authorization.tenancy.owner_key'))) {
+            throw new LogicException('authorization.tenancy.owner_role is set but owner_key is null.');
+        }
+
+        if (! in_array(config('authorization.tenancy.memberships', 'multiple'), ['multiple', 'single'], true)) {
+            throw new LogicException("authorization.tenancy.memberships must be 'multiple' or 'single'.");
+        }
     }
 
     public function id(): int|string|null

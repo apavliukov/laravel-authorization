@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization;
 
 use AlexPavliukov\Authorization\Console\MakePolicyCommand;
+use AlexPavliukov\Authorization\Console\RepairOwnershipCommand;
 use AlexPavliukov\Authorization\Console\SyncCommand;
 use AlexPavliukov\Authorization\Contracts\BypassStrategy;
 use AlexPavliukov\Authorization\Contracts\TeamResolver;
@@ -16,10 +17,14 @@ use AlexPavliukov\Authorization\Teams\DefaultTeamResolver;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\EnsurePlatformArea;
 use AlexPavliukov\Authorization\Tenancy\EnsureTenantSelected;
+use AlexPavliukov\Authorization\Tenancy\OwnershipException;
 use AlexPavliukov\Authorization\Tenancy\SetCurrentTenant;
+use AlexPavliukov\Authorization\Tenancy\TenantMembership;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Context;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
@@ -44,7 +49,12 @@ final class AuthorizationServiceProvider extends ServiceProvider
         // Always: "platform admin without tenants" is a config state, not an app-side Gate::define.
         Gate::define(EnsurePlatformArea::GATE, static fn (): bool => false);
 
-        if ($this->app->make(CurrentTenant::class)->isConfigured()) {
+        $tenancy = $this->app->make(CurrentTenant::class);
+
+        if ($tenancy->isConfigured()) {
+            $tenancy->assertValidConfig();
+            $this->guardOwnerDeletion($tenancy);
+
             Context::hydrated(static function (): void {
                 resolve(CurrentTenant::class)->syncPermissionsTeam();
             });
@@ -57,7 +67,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         }
 
         if ($this->app->runningInConsole()) {
-            $this->commands([MakePolicyCommand::class, SyncCommand::class]);
+            $this->commands([MakePolicyCommand::class, RepairOwnershipCommand::class, SyncCommand::class]);
 
             $this->publishes([
                 __DIR__.'/stubs/AuthorizationServiceProvider.stub' => app_path('Providers/AuthorizationServiceProvider.php'),
@@ -67,5 +77,24 @@ final class AuthorizationServiceProvider extends ServiceProvider
                 __DIR__.'/../config/authorization.php' => config_path('authorization.php'),
             ], 'authorization-config');
         }
+    }
+
+    /**
+     * An owner cannot be deleted. Eloquent fires `deleting` for soft and hard
+     * deletes alike; query-builder deletes bypass it (the FK still stops a hard one).
+     */
+    private function guardOwnerDeletion(CurrentTenant $tenancy): void
+    {
+        if ($tenancy->ownerKey() === null) {
+            return;
+        }
+
+        $userClass = $this->app->make(ModelHasRolesQuery::class)->userClass();
+
+        Event::listen('eloquent.deleting: '.$userClass, static function (Authenticatable $user): void {
+            if (resolve(TenantMembership::class)->ownsAnyTenant($user)) {
+                throw OwnershipException::userOwnsTenants();
+            }
+        });
     }
 }

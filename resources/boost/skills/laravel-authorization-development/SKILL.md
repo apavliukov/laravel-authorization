@@ -236,7 +236,17 @@ Middleware: `SetCurrentTenant` (priority before `SubstituteBindings`),
 **global** role; `RoleBypass` reads the global assignment regardless of the active team.
 
 Membership goes through `Tenancy\TenantMembership` (`add / changeRole / remove /
-roleFor / isMember / assignGlobal / removeEverywhere / tenantIdsOf`). Relations:
+roleFor / isMember / assignGlobal / removeGlobal / tenantIdsOf`); `tenancy.memberships
+=> 'single'` refuses a second tenant (`MembershipPolicyException`).
+
+Ownership (`tenancy.owner_role` set): the tenant's `owner_key` column (default
+`owner_id`, app migration NOT NULL + FK users) is the only record; the owner's role row
+is derived — `transferOwnership($tenant, $newOwner, $demoteTo = null)` writes both, also
+right after creating a tenant. `ownerOf / isOwner` and `HasMembers::owner()` read the
+column; it never grants access. Editing the owner's membership, granting the owner role,
+or deleting an owner throws `OwnershipException`. `AuthorizationSeeder` /
+`authorization:repair-ownership` re-derive owner rows. Archive tenants (soft delete);
+never hard-delete. Relations:
 `Tenancy\Concerns\HasMembers` on the tenant (`members()`), `HasTenantMemberships` on
 the user (`tenants()`), both morph relations through `model_has_roles`. Identity:
 `Concerns\HasAppRole` on the user — `$user->app_role` (highest role held anywhere),

@@ -9,6 +9,7 @@ use AlexPavliukov\Authorization\Concerns\HasAppRole;
 use AlexPavliukov\Authorization\Tenancy\Concerns\HasMembers;
 use AlexPavliukov\Authorization\Tenancy\Concerns\HasTenantMemberships;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
+use AlexPavliukov\Authorization\Tenancy\MembershipPolicyException;
 use AlexPavliukov\Authorization\Tenancy\Tenancy;
 use AlexPavliukov\Authorization\Tenancy\TenantMembership;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
@@ -120,20 +121,43 @@ final class TenantMembershipTest extends TenancyTestCase
     }
 
     #[Test]
-    public function remove_everywhere_detaches_every_team_and_the_global_role(): void
+    public function remove_global_drops_only_the_global_row(): void
     {
         $user = User::factory()->create();
         $this->membership->assignGlobal($user, Role::ADMIN);
         $this->membership->add($user, $this->acme, Role::MEMBER);
-        $this->membership->add($user, $this->globex, Role::MEMBER);
-        $this->assertTrue(Authorization::isGlobalSuperAdmin($user));
+        $this->assertSame(Role::ADMIN, $user->app_role);
 
-        $this->membership->removeEverywhere($user);
+        $this->membership->removeGlobal($user, Role::ADMIN);
 
-        $this->assertSame([], $this->membership->tenantIdsOf($user));
         $this->assertFalse(Authorization::isGlobalSuperAdmin($user));
-        $this->assertFalse($this->membership->isMember($user, $this->acme));
-        $this->assertNull($user->app_role);
+        $this->assertTrue($this->membership->isMember($user, $this->acme));
+        $this->assertSame(Role::MEMBER, $user->app_role);   // same instance, memo flushed
+    }
+
+    #[Test]
+    public function single_membership_refuses_a_second_tenant_but_ignores_global_roles(): void
+    {
+        config(['authorization.tenancy.memberships' => 'single']);
+        $user = User::factory()->create();
+        $this->membership->assignGlobal($user, Role::ADMIN);
+        $this->membership->add($user, $this->acme, Role::MEMBER);
+        $this->membership->changeRole($user, $this->acme, Role::EDITOR);   // same tenant is fine
+
+        $this->assertThrows(fn () => $this->membership->add($user, $this->globex, Role::MEMBER), MembershipPolicyException::class);
+        $this->assertThrows(fn () => $this->membership->changeRole($user, $this->globex, Role::MEMBER), MembershipPolicyException::class);
+
+        $this->assertSame([$this->acme->id], $this->membership->tenantIdsOf($user));
+    }
+
+    #[Test]
+    public function multiple_memberships_are_the_default(): void
+    {
+        $user = User::factory()->create();
+        $this->membership->add($user, $this->acme, Role::MEMBER);
+        $this->membership->add($user, $this->globex, Role::MEMBER);
+
+        $this->assertCount(2, $this->membership->tenantIdsOf($user));
     }
 
     #[Test]

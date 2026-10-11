@@ -11,6 +11,7 @@ enum Role: string implements AuthorizationRole
     case ADMIN = 'admin';
     case MEMBER = 'member';
     case EDITOR = 'editor';
+    case OWNER = 'owner';
 
     public function isSuperAdmin(): bool
     {
@@ -22,7 +23,7 @@ enum Role: string implements AuthorizationRole
     {
         return match ($this) {
             self::EDITOR => ['view users', 'update users'],
-            self::ADMIN, self::MEMBER => [],
+            self::ADMIN, self::MEMBER, self::OWNER => [],
         };
     }
 }

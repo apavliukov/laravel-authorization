@@ -15,8 +15,9 @@ use Spatie\Permission\Guard;
 
 /**
  * Team-aware reads against Spatie's `model_has_roles` pivot, without mutating the
- * active permissions team. Encapsulates the Spatie column/table naming so app code
- * never hand-writes the EXISTS query.
+ * active permissions team, plus the one set-based write that needs the same naming
+ * (syncOwners). Encapsulates the Spatie column/table naming so app code never
+ * hand-writes the EXISTS query.
  */
 final class ModelHasRolesQuery
 {
@@ -107,17 +108,6 @@ final class ModelHasRolesQuery
         return $this->teamIdsCache[$key] ??= $this->queryTeamIdsOf($user);
     }
 
-    /** Delete every role row of the user — in every team and globally. */
-    public function detachAll(Model $user): void
-    {
-        $user->getConnection()->table($this->pivotTable())
-            ->where($this->morphKey(), $user->getKey())
-            ->where('model_type', $user->getMorphClass())
-            ->delete();
-
-        $user->unsetRelation('roles');
-    }
-
     /**
      * The tenants (Spatie teams) the user holds any role in, as a relation —
      * for eager loading and pivot-aware queries. DISTINCT collapses several roles
@@ -143,16 +133,78 @@ final class ModelHasRolesQuery
      */
     public function membersOf(Model $tenant): MorphToMany
     {
-        /** @var class-string<Model>|null $userClass */
-        $userClass = getModelForGuard($this->guard());
-
-        if ($userClass === null) {
-            throw new RuntimeException("No user model behind guard [{$this->guard()}].");
-        }
+        $userClass = $this->userClass();
 
         return $tenant->morphedByMany($userClass, 'model', $this->pivotTable(), $this->teamKey(), $this->morphKey())
             ->whereIn($this->pivotTable().'.'.$this->roleKey(), $this->guardRoleIds(new $userClass))
             ->distinct();
+    }
+
+    /**
+     * The user model behind the default guard — the class every membership read
+     * and write is about.
+     *
+     * @return class-string<Model>
+     */
+    public function userClass(): string
+    {
+        /** @var class-string<Model>|null $userClass */
+        $userClass = getModelForGuard($this->guard());
+
+        return $userClass ?? throw new RuntimeException("No user model behind guard [{$this->guard()}].");
+    }
+
+    /**
+     * Make every tenant's `$ownerKey` user the only holder of `$roleName` in that
+     * tenant's team, in two set-based statements. Tenants without an owner are
+     * left alone. Reads the tenant table directly, so soft-deleted rows count.
+     *
+     * @return array{created: int, removed: int}
+     */
+    public function syncOwners(Model $tenant, string $ownerKey, string $roleName): array
+    {
+        $userClass = $this->userClass();
+        $user = new $userClass;
+        $roleId = $tenant->getConnection()->table($this->rolesTable())
+            ->where('name', $roleName)
+            ->where('guard_name', $this->guard($user))
+            ->value('id') ?? throw new RuntimeException("Role [{$roleName}] does not exist. Run the AuthorizationSeeder first.");
+
+        $tenants = $tenant->getTable();
+        $tenantKey = $tenants.'.'.$tenant->getKeyName();
+        $owner = $tenants.'.'.$ownerKey;
+        $pivot = $this->pivotTable();
+        $morphType = $user->getMorphClass();
+
+        $removed = $tenant->getConnection()->table($pivot)
+            ->where($this->roleKey(), $roleId)
+            ->whereExists(function (QueryBuilder $query) use ($tenants, $tenantKey, $owner, $pivot, $morphType): void {
+                $query->from($tenants)
+                    ->whereColumn($tenantKey, $pivot.'.'.$this->teamKey())
+                    ->whereNotNull($owner)
+                    ->where(function (QueryBuilder $stray) use ($owner, $pivot, $morphType): void {
+                        $stray->whereColumn($pivot.'.'.$this->morphKey(), '<>', $owner)
+                            ->orWhere($pivot.'.model_type', '<>', $morphType);
+                    });
+            })
+            ->delete();
+
+        $missing = $tenant->getConnection()->table($tenants)
+            ->whereNotNull($owner)
+            ->whereNotExists(function (QueryBuilder $query) use ($tenantKey, $owner, $pivot, $roleId, $morphType): void {
+                $query->from($pivot)
+                    ->whereColumn($pivot.'.'.$this->teamKey(), $tenantKey)
+                    ->whereColumn($pivot.'.'.$this->morphKey(), $owner)
+                    ->where($pivot.'.model_type', $morphType)
+                    ->where($pivot.'.'.$this->roleKey(), $roleId);
+            })
+            ->selectRaw('?, ?', [$roleId, $morphType])
+            ->addSelect([$owner, $tenantKey]);
+
+        $created = $tenant->getConnection()->table($pivot)
+            ->insertUsing([$this->roleKey(), 'model_type', $this->morphKey(), $this->teamKey()], $missing);
+
+        return ['created' => $created, 'removed' => $removed];
     }
 
     /**
