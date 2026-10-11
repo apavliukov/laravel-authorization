@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.2](https://github.com/apavliukov/laravel-authorization/compare/v1.3.1...v1.3.2) (2026-10-11)
+
+### Highlights
+
+Every role enum must add `public static function byPriority(): array` before upgrading — the starter, opiny, oohire and lead-crm `Role` enums — or PHP fatals as soon as the enum loads (abstract interface method). `primaryRole()` / `$user->app_role` used to rank roles by enum declaration order, an implicit contract anyone could break by reordering cases; they now return the first role in `byPriority()` the user holds. List the order each app relies on today (oohire: `CANDIDATE` before `ORGANIZATION_ADMIN`). `authorization:sync` and the seeder throw a `LogicException` if the list misses or repeats a case.
+
+### Bug Fixes
+
+* **roles:** rank primaryRole by an explicit byPriority() list, not enum declaration order ([f05136a](https://github.com/apavliukov/laravel-authorization/commit/f05136ac85ac5e3137b263effe3c3ef4a379cff5))
 ## [1.3.1](https://github.com/apavliukov/laravel-authorization/compare/v1.3.0...v1.3.1) (2026-10-11)
 
 ### Highlights
