@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.0](https://github.com/apavliukov/laravel-authorization/compare/v1.2.2...v1.3.0) (2026-10-11)
+
+### Highlights
+
+Tenant ownership moves into the tenant table: set `tenancy.owner_role` (and keep `owner_key`, default `owner_id`) and the column becomes the only record of the owner, with the owner's role row derived from it — write it through `TenantMembership::transferOwnership()`, also right after creating a tenant. Editing the owner's membership, granting the owner role or deleting an owner throws `Tenancy\OwnershipException`; `tenancy.memberships => 'single'` refuses a second tenant with `Tenancy\MembershipPolicyException`; new `removeGlobal()`, `ownerOf()`, `isOwner()`, `HasMembers::owner()`, and `AuthorizationSeeder` / `authorization:repair-ownership` re-derive owner rows on every deploy. Upgrade: 1.2 apps need no change while `owner_role` is null; to opt in, add `owner_id` (NOT NULL, FK users, `restrictOnDelete`) with the backfill from `docs/ADOPTION.md` §3, then set `owner_role`. `TenantMembership::removeEverywhere()` and `ModelHasRolesQuery::detachAll()` are removed — remove memberships one tenant at a time.
+
+### Features
+
+* **tenancy:** tenant ownership, membership policy and removeGlobal ([6a48baa](https://github.com/apavliukov/laravel-authorization/commit/6a48baa48792adfc669e22352f34c6814326fc1b))
+
 ## [1.2.2](https://github.com/apavliukov/laravel-authorization/compare/v1.2.1...v1.2.2) (2026-10-10)
 
 ### Highlights
