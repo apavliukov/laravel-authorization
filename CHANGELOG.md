@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.1](https://github.com/apavliukov/laravel-authorization/compare/v1.3.0...v1.3.1) (2026-10-11)
+
+### Highlights
+
+Security fix for 1.3.0 ownership — upgrade. Guards trusted the `owner_key` attribute of the tenant model passed in, so a tenant loaded without that column (`select(['id', 'name'])`) let the owner be removed or demoted, and a stale model made `transferOwnership()` leave the real previous owner holding the owner role. Guards now read the owner from the database; the transfer reloads the tenant row under `lockForUpdate()` and saves it, so tenant model events still fire. Run `authorization:repair-ownership` once if 1.3.0 was already in production. No API or config changes.
+
+### Bug Fixes
+
+* **tenancy:** read the tenant owner from the database, locked during transfer ([999255b](https://github.com/apavliukov/laravel-authorization/commit/999255bc9e42d90cd60895552a882ed6b2f29d10))
+
 ## [1.3.0](https://github.com/apavliukov/laravel-authorization/compare/v1.2.2...v1.3.0) (2026-10-11)
 
 ### Highlights
