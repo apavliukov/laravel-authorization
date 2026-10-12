@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.3](https://github.com/apavliukov/laravel-authorization/compare/v1.3.2...v1.3.3) (2026-10-12)
+
+### Highlights
+
+`BelongsToTenant::tenant()` no longer throws on a one-hop relation-path model (`tenantRelationPath(): 'location'`): it returns a `HasOneThrough`, so `$review->tenant`, `with('tenant')` and ide-helper / Larastan introspection work. Paths of two or more hops still throw. Its return type is now `BelongsTo|HasOneThrough` — app code calling `->tenant()->associate()` needs a narrowing for PHPStan; runtime is unchanged. `HasMembers::owner()` is typed as `Illuminate\Foundation\Auth\User`, so `transferOwnership($tenant, $tenant->owner)` passes PHPStan — drop the explicit user query workaround in opiny's `OrganizationFactory`.
+
+### Bug Fixes
+
+* **tenancy:** tenant() returns a HasOneThrough on one-hop paths; type owner() as the auth user ([9b7d4c9](https://github.com/apavliukov/laravel-authorization/commit/9b7d4c9dd239fa0eb0901d901cfa730c379dcfd5))
 ## [1.3.2](https://github.com/apavliukov/laravel-authorization/compare/v1.3.1...v1.3.2) (2026-10-11)
 
 ### Highlights
