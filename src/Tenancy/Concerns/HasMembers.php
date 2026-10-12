@@ -9,6 +9,7 @@ use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Foundation\Auth\User;
 
 /**
  * For the tenant model: its members are the users holding any role in its team,
@@ -27,12 +28,17 @@ trait HasMembers
 
     /**
      * The owning user by the `owner_key` column. Ownership never grants access
-     * by itself — the owner's role row does.
+     * by itself — the owner's role row does. Typed as Laravel's base User (what
+     * app user models extend) so `$tenant->owner` passes as Authenticatable;
+     * `Model&Authenticatable` breaks Larastan's query forwarding (`->first()`).
      *
-     * @return BelongsTo<Model, $this>
+     * @return BelongsTo<User, $this>
      */
     public function owner(): BelongsTo
     {
-        return $this->belongsTo(resolve(ModelHasRolesQuery::class)->userClass(), resolve(CurrentTenant::class)->requireOwnership()[0]);
+        /** @var class-string<User> $userClass */
+        $userClass = resolve(ModelHasRolesQuery::class)->userClass();
+
+        return $this->belongsTo($userClass, resolve(CurrentTenant::class)->requireOwnership()[0]);
     }
 }

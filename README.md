@@ -456,8 +456,10 @@ final class Comment extends Model
 }
 ```
 
-On such a transitive model `tenant()` throws a `LogicException` — walk the relation
-(`$comment->post->tenant`) instead.
+On a one-hop path (`'post'`) `tenant()` is a `HasOneThrough` built from the hop's
+`BelongsTo` and the hop model's own `tenant()`, so `$comment->tenant` and
+`with('tenant')` work. On a longer path (`'campaign.position'`) it throws a
+`LogicException` — walk the relation instead.
 
 The scope is **fail-closed**: no current tenant and no bypass ⇒ no rows, and a
 `MissingTenantContextException` when `strict` is on. Creating with no tenant and no
@@ -533,7 +535,7 @@ $membership->transferOwnership($organization, $user);          // writes the own
 $membership->transferOwnership($organization, $next, Role::ADMIN); // previous owner demoted (or dropped when null)
 $membership->ownerOf($organization);   // via the column
 $membership->isOwner($user, $organization);
-$organization->owner();                // BelongsTo (HasMembers)
+$organization->owner();                // BelongsTo<Foundation\Auth\User> (HasMembers)
 ```
 
 - `add / changeRole / remove` on the owner, and granting the owner role to anyone,

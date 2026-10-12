@@ -13,6 +13,7 @@ use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Comment;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
+use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Reaction;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TenancyTestCase;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -131,11 +132,30 @@ final class TenantScopeTest extends TenancyTestCase
     }
 
     #[Test]
-    public function tenant_relation_is_unavailable_on_transitively_owned_models(): void
+    public function a_one_hop_path_model_reaches_its_tenant_through_the_hop(): void
+    {
+        resolve(CurrentTenant::class)->withoutTenant(static function (): void {
+            foreach (Post::query()->get() as $post) {
+                Comment::query()->create(['post_id' => $post->id, 'body' => $post->title]);
+            }
+        });
+
+        $comments = resolve(CurrentTenant::class)->withoutTenant(static fn () => Comment::query()->with('tenant')->orderBy('id')->get());
+
+        $this->assertTrue($comments->every(static fn (Comment $c): bool => $c->relationLoaded('tenant')));
+        [$acmeComment, $globexComment] = $comments->all();
+
+        $this->assertTrue($this->acme->is($acmeComment->tenant));
+        $this->assertTrue($this->globex->is($globexComment->tenant));
+    }
+
+    #[Test]
+    public function tenant_relation_is_unavailable_on_multi_hop_models(): void
     {
         $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('reaches its tenant through [comment.post]');
 
-        new Comment()->tenant();
+        new Reaction()->tenant();
     }
 
     #[Test]

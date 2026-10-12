@@ -6,6 +6,7 @@ namespace AlexPavliukov\Authorization\Tenancy;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOneThrough;
 use LogicException;
 
 /**
@@ -51,15 +52,40 @@ trait BelongsToTenant
         });
     }
 
-    /** @return BelongsTo<Model, $this> */
-    public function tenant(): BelongsTo
+    /**
+     * The owning tenant: a BelongsTo on column models, a HasOneThrough on a
+     * one-hop path (e.g. 'post'), whose keys come from the hop's own relations.
+     * Longer paths throw — walk the relation instead.
+     *
+     * @return BelongsTo<Model, $this>|HasOneThrough<Model, Model, $this>
+     */
+    public function tenant(): BelongsTo|HasOneThrough
     {
-        if (static::tenantRelationPath() !== null) {
-            throw new LogicException(static::class.' reaches its tenant through ['.static::tenantRelationPath().']; walk that relation instead of tenant().');
+        $path = static::tenantRelationPath();
+
+        if ($path === null) {
+            $current = resolve(CurrentTenant::class);
+
+            return $this->belongsTo($current->modelClass(), $current->foreignKey());
         }
 
-        $current = resolve(CurrentTenant::class);
+        $hop = str_contains($path, '.') ? null : $this->{$path}();
+        $inner = $hop instanceof BelongsTo && method_exists($hop->getRelated(), 'tenant') ? $hop->getRelated()->tenant() : null;
 
-        return $this->belongsTo($current->modelClass(), $current->foreignKey());
+        if (! $hop instanceof BelongsTo || ! $inner instanceof BelongsTo) {
+            throw new LogicException(static::class.' reaches its tenant through ['.$path.']; walk that relation instead of tenant().');
+        }
+
+        /** @var Model $through */
+        $through = $hop->getRelated();
+
+        return $this->hasOneThrough(
+            $inner->getRelated()::class,
+            $through::class,
+            $hop->getOwnerKeyName(),
+            $inner->getOwnerKeyName(),
+            $hop->getForeignKeyName(),
+            $inner->getForeignKeyName(),
+        );
     }
 }
