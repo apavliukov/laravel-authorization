@@ -466,7 +466,9 @@ The scope is **fail-closed**: no current tenant and no bypass ⇒ no rows, and a
 explicit key always throws, bypass or not — a bypass never produces orphans.
 `forTenant()` suspends an outer bypass, so a platform admin reading "as" a tenant
 sees only that tenant. Cross-tenant route bindings
-404. `TenantScopedPolicy` reads the same `CurrentTenant` (no `resolveTenantUsing()`
+404, and so does restoration: Livewire model props and `SerializesModels` jobs
+keep `TenantScope` (only it — a soft-deleted model still restores), so a replayed
+snapshot carrying another tenant's key fails to hydrate. `TenantScopedPolicy` reads the same `CurrentTenant` (no `resolveTenantUsing()`
 needed) and stays as defence-in-depth.
 
 ### Bypass and switching
@@ -496,7 +498,10 @@ the one named API, and it is what `EnsurePlatformArea` uses.
 The tenant id and bypass flag live in Laravel's hidden `Context`, so they ride
 along with every queued job automatically; the worker re-applies the Spatie team
 when the context is hydrated. A job dispatched inside `withoutTenant()` runs
-bypassed.
+bypassed. A job holding a tenant model that is dispatched with **no** tenant
+(public pages, commands) fails to restore it — `MissingTenantContextException`
+under `strict`, `ModelNotFoundException` otherwise; dispatch it inside
+`forTenant()` or `withoutTenant()`.
 
 ### Membership
 

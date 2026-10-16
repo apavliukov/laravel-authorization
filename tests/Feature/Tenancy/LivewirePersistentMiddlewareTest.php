@@ -15,6 +15,7 @@ use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\PostCounter;
+use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\PostTitle;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TenancyTestCase;
 use Illuminate\Foundation\Application;
@@ -45,6 +46,8 @@ final class LivewirePersistentMiddlewareTest extends TenancyTestCase
 
     private Organization $acme;
 
+    private Organization $globex;
+
     /**
      * @param  Application  $app
      * @return array<int, class-string>
@@ -60,17 +63,22 @@ final class LivewirePersistentMiddlewareTest extends TenancyTestCase
 
         $this->withoutMiddleware(PreventRequestForgery::class);
         Livewire::component('post-counter', PostCounter::class);
+        Livewire::component('post-title', PostTitle::class);
 
         $this->acme = Organization::query()->create(['name' => 'Acme']);
-        $globex = Organization::query()->create(['name' => 'Globex']);
-        resolve(CurrentTenant::class)->withoutTenant(function () use ($globex): void {
+        $this->globex = Organization::query()->create(['name' => 'Globex']);
+        resolve(CurrentTenant::class)->withoutTenant(function (): void {
             Post::query()->create(['organization_id' => $this->acme->id, 'title' => 'a']);
-            Post::query()->create(['organization_id' => $globex->id, 'title' => 'g']);
+            Post::query()->create(['organization_id' => $this->globex->id, 'title' => 'g']);
         });
 
         $page = static fn (): string => Blade::render('<html><body>@livewire(\'post-counter\')</body></html>');
         Route::middleware(['web', EnsurePlatformArea::class])->get('/platform/posts', $page)->name('admin.platform.posts');
         Route::middleware(['web', EnsureTenantSelected::class])->get('/organization/posts', $page)->name('admin.organization.posts');
+        Route::middleware(['web', EnsureTenantSelected::class])->get('/organization/post', static fn (): string => Blade::render(
+            '<html><body>@livewire(\'post-title\', [\'post\' => $post])</body></html>',
+            ['post' => Post::query()->where('title', 'a')->firstOrFail()],
+        ))->name('admin.organization.post');
     }
 
     #[Test]
@@ -100,6 +108,25 @@ final class LivewirePersistentMiddlewareTest extends TenancyTestCase
         resolve(TenantMembership::class)->remove($member, $this->acme);
 
         $this->callAction($page, 'load')->assertForbidden();
+    }
+
+    #[Test]
+    public function a_snapshot_replayed_under_another_tenant_does_not_hydrate_its_model(): void
+    {
+        $member = User::factory()->create();
+        resolve(TenantMembership::class)->add($member, $this->acme, Role::MEMBER);
+        resolve(TenantMembership::class)->add($member, $this->globex, Role::MEMBER);
+
+        $page = $this->actingAs($member)
+            ->withSession([TenantResolver::sessionKey() => $this->acme->id])
+            ->get('/organization/post')
+            ->assertOk();
+
+        $this->callAction($page, 'load')->assertOk()->assertSee('title:a');
+
+        $this->withSession([TenantResolver::sessionKey() => $this->globex->id]);
+
+        $this->callAction($page, 'load')->assertNotFound();
     }
 
     /**

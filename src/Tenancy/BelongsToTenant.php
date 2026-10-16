@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization\Tenancy;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOneThrough;
@@ -13,7 +14,8 @@ use LogicException;
  * Tenant-owned model: filtered by TenantScope, tenant key autofilled on create
  * (creating with no tenant and no explicit key always throws — a bypass never
  * produces orphans).
- * Route binding 404s across tenants because the scope applies to the lookup.
+ * Route binding 404s across tenants because the scope applies to the lookup;
+ * so does restoration (Livewire model props, SerializesModels jobs).
  * Models that reach the tenant through another model override
  * tenantRelationPath() (e.g. 'post' or 'campaign.position') instead of
  * carrying the column themselves.
@@ -50,6 +52,22 @@ trait BelongsToTenant
 
             $model->setAttribute($foreignKey, $id);
         });
+    }
+
+    /**
+     * Eloquent restores without any global scope; keep TenantScope (and only it,
+     * so e.g. a soft-deleted model still restores) — a replayed Livewire snapshot
+     * or a job must not load another tenant's row.
+     *
+     * @param  array<int, mixed>|int  $ids
+     * @return Builder<static>
+     */
+    public function newQueryForRestoration($ids)
+    {
+        /** @phpstan-ignore return.type (larastan narrows the trait's Builder<static> to the concrete class) */
+        return $this->newQueryWithoutScopes()
+            ->withGlobalScope(TenantScope::class, new TenantScope(static::tenantRelationPath()))
+            ->whereKey($ids);
     }
 
     /**

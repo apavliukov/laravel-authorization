@@ -176,4 +176,48 @@ final class TenantScopeTest extends TenancyTestCase
 
         Post::query()->findOrFail($foreign->id);
     }
+
+    #[Test]
+    public function restoration_is_fenced_to_the_current_tenant(): void
+    {
+        resolve(CurrentTenant::class)->set($this->acme);
+
+        $this->assertSame(['acme post'], (new Post)->newQueryForRestoration(Post::withoutGlobalScopes()->pluck('id')->all())->pluck('title')->all());
+    }
+
+    #[Test]
+    public function restoration_without_a_tenant_throws_in_strict_mode(): void
+    {
+        $this->expectException(MissingTenantContextException::class);
+
+        (new Post)->newQueryForRestoration(1)->first();
+    }
+
+    #[Test]
+    public function restoration_under_bypass_sees_everything(): void
+    {
+        $count = resolve(CurrentTenant::class)->withoutTenant(static fn (): int => (new Post)->newQueryForRestoration([1, 2])->count());
+
+        $this->assertSame(2, $count);
+    }
+
+    #[Test]
+    public function restoration_fences_transitively_owned_models_and_skips_other_scopes(): void
+    {
+        $hidden = new class extends Comment
+        {
+            protected $table = 'comments';
+
+            protected static function booted(): void
+            {
+                self::addGlobalScope('hidden', static fn ($query) => $query->whereRaw('1 = 0'));
+            }
+        };
+        $ids = resolve(CurrentTenant::class)->withoutTenant(static fn (): array => Post::query()->get()
+            ->map(static fn (Post $post): int => Comment::query()->create(['post_id' => $post->id, 'body' => $post->title])->id)
+            ->all());
+        resolve(CurrentTenant::class)->set($this->globex);
+
+        $this->assertSame(['globex post'], $hidden->newQueryForRestoration($ids)->pluck('body')->all());
+    }
 }
