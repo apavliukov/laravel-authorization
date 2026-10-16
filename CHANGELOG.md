@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.5.0](https://github.com/apavliukov/laravel-authorization/compare/v1.4.0...v1.5.0) (2026-10-16)
+
+### Highlights
+
+Tenant entry is now one rule in `TenantResolver`: the new `tenancy.enterable_scope` (a local scope such as `active`) applies to the session choice, the fallback and super-admins, and the new `choose()` / `clearChoice()` replace hand-written `session([...])` + `Tenancy::set()` in tenant switchers. Opt in to `tenancy.fallback_to_owned` to enter the user's own tenant when they have several, and listen to `TenantChoiceDropped` for a "you were removed" flash. Behaviour change: the sole-tenant fallback now counts enterable tenants, so a user with one live tenant and one deleted or inactive one now gets the live tenant instead of none. `CurrentArea` now resolves the page's area on `/livewire/update` and works outside HTTP; its constructor gained a `Router` parameter, so code that calls `new CurrentArea($request)` must resolve it from the container instead. No migrations; add the two new config keys if you publish the config.
+
+### Features
+
+* **tenancy:** current area follows the page's route on Livewire updates ([7f3d60c](https://github.com/apavliukov/laravel-authorization/commit/7f3d60cfecc2dc050ca19b376826537438ef7f88))
+* **tenancy:** enterable tenants, choose()/clearChoice(), owned fallback, TenantChoiceDropped ([85782bd](https://github.com/apavliukov/laravel-authorization/commit/85782bd132c811e83aa3403deab88438308f2558))
 ## [1.4.0](https://github.com/apavliukov/laravel-authorization/compare/v1.3.3...v1.4.0) (2026-10-16)
 
 ### Highlights
