@@ -12,8 +12,8 @@ use LogicException;
 
 /**
  * Tenant-owned model: filtered by TenantScope, tenant key autofilled on create
- * (creating with no tenant and no explicit key always throws — a bypass never
- * produces orphans).
+ * (creating with no tenant and no explicit key throws — a bypass never produces
+ * orphans, unless the model opts in via allowsNullTenant()).
  * Route binding 404s across tenants because the scope applies to the lookup;
  * so does restoration (Livewire model props, SerializesModels jobs).
  * Models that reach the tenant through another model override
@@ -26,6 +26,17 @@ trait BelongsToTenant
     protected static function tenantRelationPath(): ?string
     {
         return null;
+    }
+
+    /**
+     * Rows with a NULL tenant are part of the model (e.g. platform-wide templates):
+     * created under an explicit bypass they keep NULL — even if a tenant is active
+     * (a super-admin's session choice in the platform area). Inside a tenant the key
+     * is still autofilled; NULL rows are visible only under bypass.
+     */
+    protected static function allowsNullTenant(): bool
+    {
+        return false;
     }
 
     public static function bootBelongsToTenant(): void
@@ -41,6 +52,10 @@ trait BelongsToTenant
             $foreignKey = $tenant->foreignKey();
 
             if ($model->getAttribute($foreignKey) !== null) {
+                return;
+            }
+
+            if ($tenant->isBypassed() && static::allowsNullTenant()) {
                 return;
             }
 

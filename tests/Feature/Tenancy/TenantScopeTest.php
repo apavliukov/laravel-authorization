@@ -12,6 +12,7 @@ use AlexPavliukov\Authorization\Tenancy\TenantScope;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Comment;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
+use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\PlatformPost;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Reaction;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
@@ -164,6 +165,48 @@ final class TenantScopeTest extends TenancyTestCase
         $this->expectException(MissingTenantContextException::class);
 
         resolve(CurrentTenant::class)->withoutTenant(static fn (): Post => Post::query()->create(['title' => 'orphan']));
+    }
+
+    #[Test]
+    public function a_model_allowing_a_null_tenant_stores_null_under_bypass_and_shows_it_only_there(): void
+    {
+        $tenancy = resolve(CurrentTenant::class);
+
+        $platform = $tenancy->withoutTenant(static fn (): PlatformPost => PlatformPost::query()->create(['title' => 'platform']));
+
+        $this->assertNull($platform->organization_id);
+        $tenancy->set($this->acme);
+        $this->assertSame(['acme post'], PlatformPost::query()->pluck('title')->all());
+        $this->assertSame(['acme post', 'globex post', 'platform'], $tenancy->withoutTenant(static fn (): array => PlatformPost::query()->orderBy('id')->pluck('title')->all()));
+    }
+
+    #[Test]
+    public function a_model_allowing_a_null_tenant_ignores_a_lingering_tenant_under_bypass(): void
+    {
+        $tenancy = resolve(CurrentTenant::class);
+        $tenancy->set($this->acme);
+
+        $platform = $tenancy->withoutTenant(static fn (): PlatformPost => PlatformPost::query()->create(['title' => 'platform']));
+
+        $this->assertNull($platform->organization_id);
+    }
+
+    #[Test]
+    public function a_model_allowing_a_null_tenant_is_still_autofilled_inside_a_tenant(): void
+    {
+        $tenancy = resolve(CurrentTenant::class);
+
+        $post = $tenancy->forTenant($this->acme, static fn (): PlatformPost => PlatformPost::query()->create(['title' => 'scoped']));
+
+        $this->assertSame($this->acme->id, $post->organization_id);
+    }
+
+    #[Test]
+    public function a_model_allowing_a_null_tenant_still_throws_with_no_tenant_and_no_bypass(): void
+    {
+        $this->expectException(MissingTenantContextException::class);
+
+        PlatformPost::query()->create(['title' => 'forgot context']);
     }
 
     #[Test]

@@ -482,6 +482,10 @@ On a one-hop path (`'post'`) `tenant()` is a `HasOneThrough` built from the hop'
 The scope is **fail-closed**: no current tenant and no bypass ⇒ no rows, and a
 `MissingTenantContextException` when `strict` is on. Creating with no tenant and no
 explicit key always throws, bypass or not — a bypass never produces orphans.
+A model whose NULL-tenant rows are by design (platform-wide templates) opts in with
+`protected static function allowsNullTenant(): bool { return true; }`: under a
+bypass it then stores NULL (even with a tenant active); inside a tenant it is still
+autofilled, and with neither it still throws. NULL rows are visible only under bypass.
 `forTenant()` suspends an outer bypass, so a platform admin reading "as" a tenant
 sees only that tenant. Cross-tenant route bindings
 404, and so does restoration: Livewire model props and `SerializesModels` jobs
