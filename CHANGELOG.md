@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.5.1](https://github.com/apavliukov/laravel-authorization/compare/v1.5.0...v1.5.1) (2026-10-16)
+
+### Highlights
+
+Models whose NULL-tenant rows are by design (platform-wide templates) can now create them: override `protected static function allowsNullTenant(): bool { return true; }`, and a create under `withoutTenant()` or in the platform area stores NULL, even while a tenant is active. Inside a tenant the key is still autofilled, and with no tenant and no bypass it still throws; every model that does not opt in behaves as before.
+
+### Bug Fixes
+
+* **tenancy:** let a model opt in to NULL-tenant rows created under bypass ([845273d](https://github.com/apavliukov/laravel-authorization/commit/845273d3c8f66923ec0751ecf9e873bd851e94c9))
 ## [1.5.0](https://github.com/apavliukov/laravel-authorization/compare/v1.4.0...v1.5.0) (2026-10-16)
 
 ### Highlights
