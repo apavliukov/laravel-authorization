@@ -14,6 +14,7 @@ use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
 use AlexPavliukov\Authorization\Support\RoleBypass;
 use AlexPavliukov\Authorization\Support\UserPermissionMemo;
 use AlexPavliukov\Authorization\Teams\DefaultTeamResolver;
+use AlexPavliukov\Authorization\Tenancy\CurrentArea;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\EnsurePlatformArea;
 use AlexPavliukov\Authorization\Tenancy\EnsureTenantSelected;
@@ -28,6 +29,9 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
+use Livewire\Mechanisms\HandleRequests\HandleRequests;
+
+use function Livewire\on;
 
 final class AuthorizationServiceProvider extends ServiceProvider
 {
@@ -66,6 +70,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
             }
         }
 
+        if (class_exists(Livewire::class)) {
+            $this->rememberLivewireOriginalRoute();
+        }
+
         if ($this->app->runningInConsole()) {
             $this->commands([MakePolicyCommand::class, RepairOwnershipCommand::class, SyncCommand::class]);
 
@@ -77,6 +85,18 @@ final class AuthorizationServiceProvider extends ServiceProvider
                 __DIR__.'/../config/authorization.php' => config_path('authorization.php'),
             ], 'authorization-config');
         }
+    }
+
+    /** /livewire/update matches no area pattern: let CurrentArea see the page's route instead. */
+    private function rememberLivewireOriginalRoute(): void
+    {
+        on('snapshot-verified', static function (array $snapshot): void {
+            if (! resolve(HandleRequests::class)->isLivewireRoute()) {
+                return;
+            }
+
+            resolve(CurrentArea::class)->rememberOriginalRoute(data_get($snapshot, 'memo.path'), data_get($snapshot, 'memo.method'));
+        });
     }
 
     /**

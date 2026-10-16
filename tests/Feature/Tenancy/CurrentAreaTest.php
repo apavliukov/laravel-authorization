@@ -47,6 +47,14 @@ final class CurrentAreaTest extends TenancyTestCase
     }
 
     #[Test]
+    public function the_view_mode_works_outside_an_http_request(): void
+    {
+        resolve(CurrentArea::class)->set('member');
+
+        $this->assertSame('member', resolve(CurrentArea::class)->current());
+    }
+
+    #[Test]
     public function set_rejects_unknown_areas(): void
     {
         $this->expectException(\InvalidArgumentException::class);

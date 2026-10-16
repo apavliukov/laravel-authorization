@@ -560,7 +560,9 @@ $organization->owner();                // BelongsTo<Foundation\Auth\User> (HasMe
 by matching the route name against the `Str::is` patterns in
 `config('authorization.areas')` (default `*platform.*` etc., so `admin.platform.x`
 matches), falling back to a session view mode (`set()`) and then the first
-configured area. Off-request (console, queue) there is no route, so the fallback
+configured area. On `/livewire/update` it matches the route of the page the
+component was rendered on (from the verified snapshot), not `livewire.update`.
+Off-request (console, queue, `Livewire::test`) there is no route, so the fallback
 applies. It knows nothing about the tenant — that split is deliberate.
 
 ### Testing
