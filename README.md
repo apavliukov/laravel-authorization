@@ -366,6 +366,8 @@ One tenancy layer, switched on by config. Publish it with
     'model' => App\Models\Organization::class,   // null = no tenancy
     'foreign_key' => 'organization_id',
     'session_key' => 'current_organization_id',
+    'enterable_scope' => null,                    // local scope name, e.g. 'active'
+    'fallback_to_owned' => false,                 // several tenants ⇒ the owned one
     'strict' => env('APP_ENV') !== 'production',
     'missing_tenant_redirect' => null,            // route name, e.g. 'organizations.pick'
 ],
@@ -381,9 +383,25 @@ tenants plus global roles (`team_id NULL`). One resolver (`Tenancy\TenantResolve
 
 1. the `session_key` value, honoured only while the user is a member of that tenant
    (a global super-admin may enter any tenant that exists); a stale key is dropped;
-2. otherwise the user's **sole** tenant;
-3. otherwise none — several tenants and no session choice never pick an arbitrary
+2. otherwise the user's **sole** enterable tenant;
+3. otherwise, with `fallback_to_owned => true` (needs ownership on), the sole
+   enterable tenant they own;
+4. otherwise none — several tenants and no session choice never pick an arbitrary
    row (`EnsureTenantSelected` then 403s / redirects to `missing_tenant_redirect`).
+
+A tenant is entered only while its row exists and passes `enterable_scope` (a local
+scope on the tenant model, e.g. `scopeActive`) — for members and super-admins alike.
+Deactivate a tenant and its users fall out of it on their next request. Whenever
+the resolver drops a stale session choice it dispatches `Tenancy\TenantChoiceDropped`
+(`$user`, `$tenantId`) — listen to it for a "you were removed from X" flash.
+
+A tenant switcher writes the choice through the resolver, never the session key:
+
+```php
+$resolver = resolve(TenantResolver::class);
+$resolver->choose($request->user(), $organization);  // 403 (AuthorizationException) unless enterable
+$resolver->clearChoice();                            // next request: sole enterable tenant, else none
+```
 
 ```php
 use AlexPavliukov\Authorization\Tenancy\Concerns\HasMembers;            // tenant model

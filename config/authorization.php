@@ -27,6 +27,16 @@ return [
         // else the user's sole team, else none.
         'session_key' => 'current_organization_id',
 
+        // Local scope on the tenant model a tenant must pass to be entered (session
+        // choice or sole-tenant fallback), super-admins included. A tenant falling
+        // out of it is dropped from the session on the next request. null ⇒ any
+        // tenant row that exists.
+        'enterable_scope' => null,   // 'active'
+
+        // Several enterable tenants and no session choice ⇒ enter the one the user
+        // owns (if exactly one) instead of none. Needs ownership on (owner_role).
+        'fallback_to_owned' => false,
+
         // Throw MissingTenantContextException when a tenant-owned query runs with
         // no tenant and no bypass. Off ⇒ the query silently yields nothing.
         'strict' => env('APP_ENV') !== 'production',
