@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.4.0](https://github.com/apavliukov/laravel-authorization/compare/v1.3.3...v1.4.0) (2026-10-16)
+
+### Highlights
+
+Security fix — upgrade. Eloquent restores Livewire model props and `SerializesModels` job models without global scopes, so a snapshot replayed after a tenant switch hydrated another tenant's model; `BelongsToTenant` now keeps `TenantScope` on restoration (only it — soft-deleted models still restore). Before upgrading, check every job that holds a tenant model and is dispatched with no tenant (public pages, commands): it now fails with `MissingTenantContextException` under `strict`, `ModelNotFoundException` otherwise — dispatch it inside `forTenant()` or `withoutTenant()`. Per-action `authorize()` in opiny/oohire stays for abilities but is no longer the only tenant boundary.
+
+### Bug Fixes
+
+* **tenancy:** keep TenantScope when Eloquent restores a model ([f4305e5](https://github.com/apavliukov/laravel-authorization/commit/f4305e59a1ab04b788ab22764da75bf2765172ed))
 ## [1.3.3](https://github.com/apavliukov/laravel-authorization/compare/v1.3.2...v1.3.3) (2026-10-12)
 
 ### Highlights
