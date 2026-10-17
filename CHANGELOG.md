@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.5.2](https://github.com/apavliukov/laravel-authorization/compare/v1.5.1...v1.5.2) (2026-10-17)
+
+### Highlights
+
+The tenant fence on relation-path models (`tenantRelationPath()`) now checks the tenant only: global scopes of the hops, app scopes and `SoftDeletingScope` alike, no longer leak into every query of the model. Before upgrading, check every app with a `tenantRelationPath()` model whose hop models carry soft deletes or an app scope: rows under soft-deleted parents, or under parents an app scope hides from the user, now appear inside their tenant, so filter them explicitly where that matters. A path ending at a model without `BelongsToTenant` now throws a `LogicException` instead of applying no tenant filter.
+
+### Bug Fixes
+
+* **tenancy:** fence relation-path models by tenant only ([06d89fe](https://github.com/apavliukov/laravel-authorization/commit/06d89fed5537b8953fa0b1c19fc99e7222cf8f5c))
 ## [1.5.1](https://github.com/apavliukov/laravel-authorization/compare/v1.5.0...v1.5.1) (2026-10-16)
 
 ### Highlights
