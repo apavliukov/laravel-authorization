@@ -15,6 +15,10 @@ use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\PlatformPost;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Reaction;
+use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\ScopedComment;
+use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\ScopedPost;
+use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\UnfencedComment;
+use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Vote;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TenancyTestCase;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -122,6 +126,43 @@ final class TenantScopeTest extends TenancyTestCase
         resolve(CurrentTenant::class)->set($this->globex);
 
         $this->assertSame(['globex post'], Comment::query()->pluck('body')->all());
+    }
+
+    #[Test]
+    public function the_relation_path_fence_ignores_app_scopes_and_soft_deletes_of_the_hops(): void
+    {
+        $this->seedScopedChain();
+
+        resolve(CurrentTenant::class)->set($this->acme);
+
+        $this->assertSame(['on acme post', 'on archived acme', 'on hidden acme'], ScopedComment::query()->orderBy('body')->pluck('body')->all());
+    }
+
+    #[Test]
+    public function the_fence_drops_scopes_on_intermediate_hops_and_through_a_transitively_owned_last_hop(): void
+    {
+        $this->seedScopedChain();
+
+        resolve(CurrentTenant::class)->set($this->acme);
+
+        $this->assertSame(4, Reaction::query()->count());
+        $this->assertSame(4, Vote::query()->count());
+
+        resolve(CurrentTenant::class)->set($this->globex);
+
+        $this->assertSame(1, Reaction::query()->count());
+        $this->assertSame(1, Vote::query()->count());
+    }
+
+    #[Test]
+    public function a_relation_path_ending_at_a_model_without_belongs_to_tenant_is_a_logic_error(): void
+    {
+        resolve(CurrentTenant::class)->set($this->acme);
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage(UnfencedComment::class);
+
+        UnfencedComment::query()->get();
     }
 
     #[Test]
@@ -262,5 +303,26 @@ final class TenantScopeTest extends TenancyTestCase
         resolve(CurrentTenant::class)->set($this->globex);
 
         $this->assertSame(['globex post'], $hidden->newQueryForRestoration($ids)->pluck('body')->all());
+    }
+
+    /** Acme: a plain, an app-scope-hidden and a soft-deleted post; one comment each plus a hidden one; a reaction per comment. Globex: one of each. */
+    private function seedScopedChain(): void
+    {
+        resolve(CurrentTenant::class)->withoutTenant(function (): void {
+            $plain = Post::query()->get()->all();
+            $hidden = ScopedPost::query()->create(['organization_id' => $this->acme->id, 'title' => 'hidden acme']);
+            $archived = ScopedPost::query()->create(['organization_id' => $this->acme->id, 'title' => 'archived acme']);
+            $archived->delete();
+
+            foreach ([...$plain, $hidden, $archived] as $post) {
+                ScopedComment::query()->create(['post_id' => $post->id, 'body' => "on {$post->title}"]);
+            }
+
+            ScopedComment::query()->create(['post_id' => $hidden->id, 'body' => 'hidden comment']);
+
+            foreach (ScopedComment::query()->withoutGlobalScope('app')->get() as $comment) {
+                Reaction::query()->create(['comment_id' => $comment->id]);
+            }
+        });
     }
 }

@@ -479,6 +479,13 @@ On a one-hop path (`'post'`) `tenant()` is a `HasOneThrough` built from the hop'
 `with('tenant')` work. On a longer path (`'campaign.position'`) it throws a
 `LogicException` — walk the relation instead.
 
+The path fences by **tenant only**: each hop is joined with its global scopes
+dropped — app scopes and soft deletes alike — and only the last hop's own
+`TenantScope` decides. A comment under a soft-deleted post, or an application in a
+campaign an app scope hides from the user, stays visible inside its tenant; filter
+it explicitly where that matters. The last hop must use `BelongsToTenant`
+(`LogicException` otherwise).
+
 The scope is **fail-closed**: no current tenant and no bypass ⇒ no rows, and a
 `MissingTenantContextException` when `strict` is on. Creating with no tenant and no
 explicit key always throws, bypass or not — a bypass never produces orphans.
