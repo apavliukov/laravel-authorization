@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.0](https://github.com/apavliukov/laravel-authorization/compare/v1.5.2...v1.6.0) (2026-10-17)
+
+### Highlights
+
+Scope cut: the package now carries only what oohire and opiny both use — single-database organizations, roles inside them, and a platform admin. Public API is removed in a minor on purpose (two consumers, both the author's). No migrations, and the remaining behaviour is unchanged.
+
+Removed, with what replaces it:
+
+- **Teams without tenancy** — `TeamResolver`, `DefaultTeamResolver`, `CallbackTeamResolver`, `SetPermissionsTeam`, `Authorization::resolveTeamsUsing()` / `teamResolver()`. `SetCurrentTenant` sets the permissions team; an app with teams but no tenancy calls `setPermissionsTeamId()` from its own middleware.
+- **Pluggable bypass** — `Contracts\BypassStrategy`, `Support\RoleBypass`, `Support\NoBypass`, `Support\BypassGate`, `Authorization::bypassUsing()`. The provider registers one `Gate::before` with the same rule: a super-admin passes (under teams only the global assignment counts), everyone else falls through, never `false`.
+- **Pre-tenancy policy wiring** — `Authorization::resolveTenantUsing()`, `tenantColumn()`, `systemAbilities()`, and the manager's `currentTenant()` / `tenantColumnName()`. `TenantScopedPolicy` compares `Tenancy::id()` with the model's `tenancy.foreign_key`; define system-ability gates with `Gate::define(SystemAbility::X->value, static fn (): bool => false)`.
+- **Permission verdict memo** — `Support\UserPermissionMemo`, `Authorization::forgetUserPermissions()`. `userCan()` is now plain `$user->can()`. Role-read memoization and `forgetUserRoles()` stay.
+- **UI areas** — `Tenancy\CurrentArea`, the `authorization.areas` config and the Livewire original-route hook. The UI area is app routing; an app that kept `CurrentArea::SESSION_KEY` needs its own key.
+- **Tenant-entry knobs from 1.5.0** — `tenancy.enterable_scope`, `tenancy.fallback_to_owned`, `TenantResolver::choose()` / `clearChoice()`, `Tenancy\TenantChoiceDropped`. The resolver still drops a gone (or soft-deleted) tenant and picks the user's sole existing one; narrower picker rules (active only, owned first) live in the app's switcher.
+- **Sync tooling** — `PermissionSync::plan()`, `apply(prune: true)`, and the `authorization:sync`, `authorization:repair-ownership` and `make:authorization-policy` commands. `AuthorizationSeeder` still syncs permissions and roles and re-derives owner rows on every run.
+
+Upgrade: drop `enterable_scope`, `fallback_to_owned` and `areas` from a published `config/authorization.php`; replace references to the symbols above (oohire: `ProviderWiringTest`'s `BypassStrategy` assertion and `Support\Areas`'s `CurrentArea::SESSION_KEY`; laravel-starter: `CurrentLayout`'s `CurrentArea`); remove any deploy step calling the deleted commands.
+
+### Code Refactoring
+
+* **core:** cut the API no consuming project uses ([cafcd3c](https://github.com/apavliukov/laravel-authorization/commit/cafcd3c4ee9797806a50bb04bff9215af06ff52d))
 ## [1.5.2](https://github.com/apavliukov/laravel-authorization/compare/v1.5.1...v1.5.2) (2026-10-17)
 
 ### Highlights
