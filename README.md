@@ -2,7 +2,7 @@
 
 A reusable, Spatie-permission-based authorization layer for Laravel: resource
 policies, ability enums, role semantics, a permission registry, idempotent
-seeding, and a pluggable admin bypass.
+seeding, and a super-admin bypass.
 
 The package owns the generic core. Your application keeps only what is genuinely
 app-specific: the role enum, concrete policies, the user model, and the
@@ -31,8 +31,7 @@ php artisan migrate
 ```
 
 The package's core `AuthorizationServiceProvider` is auto-discovered. It registers
-the bindings, the `Gate::before` bypass hook, the `make:authorization-policy`
-command, and (when Spatie teams are enabled) the team middleware.
+the bindings and the `Gate::before` super-admin bypass.
 
 ## Setup
 
@@ -82,8 +81,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
 Your role enum implements `AuthorizationRole`. `isSuperAdmin()` drives the bypass;
 `permissions()` is consumed by the seeder to grant per-role permissions;
 `byPriority()` ranks the cases for [`primaryRole()`](#primary-role-for-routing) and
-must list every case exactly once — `authorization:sync` and the seeder throw
-otherwise.
+must list every case exactly once — the seeder throws otherwise.
 
 ```php
 use AlexPavliukov\Authorization\Contracts\AuthorizationRole;
@@ -151,12 +149,6 @@ final readonly class PostPolicy extends AbstractPolicy
 }
 ```
 
-Scaffold one with the generator:
-
-```bash
-php artisan make:authorization-policy Post
-```
-
 ### Ownership / tenancy scoping (`ownsModel()`)
 
 The model-bound methods (`view`, `update`, `delete`, `restore`, `forceDelete`)
@@ -186,17 +178,10 @@ The CRUD methods are not `final`, so a policy that needs different logic (e.g.
 
 ### Attribute tenancy (`TenantScopedPolicy`)
 
-For the common case — a model fenced to the current user's tenant by an owning
-column — extend `TenantScopedPolicy` instead of hand-writing `ownsModel()`. With
-the [tenancy layer](#tenancy) configured it reads `CurrentTenant` and
-`tenancy.foreign_key` — nothing to declare. Without it, declare once how to read
-the tenant from the user and the default owning column:
-
-```php
-// in your AuthorizationServiceProvider::boot() — only when tenancy.model is NOT set
-Authorization::resolveTenantUsing(static fn (User $user): ?int => $user->company?->id);
-Authorization::tenantColumn('company_id'); // default owning column (defaults to tenant_id)
-```
+For the common case — a model fenced to the current tenant by an owning column —
+extend `TenantScopedPolicy` instead of hand-writing `ownsModel()`. It compares
+`Tenancy::id()` (the [tenancy layer](#tenancy) must be configured) with the model's
+`tenancy.foreign_key` column — nothing to declare:
 
 ```php
 use AlexPavliukov\Authorization\TenantScopedPolicy;
@@ -214,13 +199,10 @@ final readonly class ReviewPolicy extends TenantScopedPolicy
 
     protected function tenantKey(Model $model): int|string|null
     {
-        return $model->location?->company_id;
+        return $model->location?->organization_id;
     }
 }
 ```
-
-The resolver closure may type-hint your concrete user model (`User $user`), so
-scoped policies never touch `$user` and need no type narrowing.
 
 ## Abilities and permission names
 
@@ -228,11 +210,11 @@ scoped policies never touch `$user` and need no type narrowing.
   methods). Values are camelCase so Gate routes them straight to policy methods.
 - System abilities (model-less `Gate::define()` checks, e.g. "access platform
   admin") are **app-defined** — declare your own enum; the package ships no
-  `SystemAbility` enum. Register deny-by-default gates for it in one call (only the
-  super-admin bypass then grants them), and check with `@can(Ability::X->value)`:
+  `SystemAbility` enum. Define a deny-by-default gate per case in your provider (only
+  the super-admin bypass then grants it), and check with `@can(SystemAbility::X->value)`:
 
   ```php
-  Authorization::systemAbilities(\App\Enums\SystemAbility::class);
+  Gate::define(SystemAbility::ACCESS_PLATFORM_ADMIN->value, static fn (): bool => false);
   ```
 - Model-specific abilities are added by overriding `HasPolicy::getCustomAbilities()`:
 
@@ -285,47 +267,15 @@ return $role->landingUrl(); // landingUrl() is your app's business method
 
 ## Admin bypass
 
-`Gate::before` is wired through a pluggable `BypassStrategy`, resolved from the
-container lazily on each check.
-
-- **`Support\RoleBypass` (default)** — holders of a super-admin role bypass every
-  check. It accepts an optional list of *protected* abilities that always fall
-  through to policies:
-
-  ```php
-  use AlexPavliukov\Authorization\Authorization;
-  use AlexPavliukov\Authorization\Enums\Ability;
-  use AlexPavliukov\Authorization\Support\RoleBypass;
-
-  Authorization::bypassUsing(new RoleBypass(
-      app(\AlexPavliukov\Authorization\AuthorizationManager::class),
-      protected: [Ability::FORCE_DELETE],
-  ));
-  ```
-
-- **`Support\NoBypass`** — no god-mode; every check goes through Spatie/policies:
-
-  ```php
-  Authorization::bypassUsing(\AlexPavliukov\Authorization\Support\NoBypass::class);
-  ```
-
-With Spatie teams on, `RoleBypass` reads the **global** assignment
-(`team_id IS NULL`) regardless of the active team: a platform admin keeps bypassing
-inside a tenant, and a tenant-scoped copy of a super-admin role never bypasses.
-
-You can also override the strategy by rebinding the contract in the container:
-
-```php
-$this->app->bind(
-    \AlexPavliukov\Authorization\Contracts\BypassStrategy::class,
-    \App\Authorization\YourStrategy::class,
-);
-```
+The provider registers one `Gate::before`: holders of a super-admin role (per the
+role enum's `isSuperAdmin()`) pass every gate check; everyone else falls through
+(`null`, never `false`). With Spatie teams on, only the **global** assignment
+(`team_id IS NULL`) counts, regardless of the active team: a platform admin keeps
+bypassing inside a tenant, and a tenant-scoped copy of a super-admin role never
+bypasses.
 
 **Guiding principle:** a super-admin has the right to do everything. Real "can't"s
 are business invariants enforced in the Action/domain layer, not authorization.
-`protected` / `NoBypass` exist only for genuine authorization-level carve-outs
-(separation of duties, break-glass).
 
 ## Seeding
 
@@ -342,18 +292,8 @@ public function run(): void
 }
 ```
 
-The same sync is available as a command. Preview the diff with `--dry-run`, and
-delete permissions the registry no longer declares with `--prune`:
-
-```bash
-php artisan authorization:sync             # create missing permissions + sync role grants
-php artisan authorization:sync --dry-run   # show the create/remove/grant/revoke diff, write nothing
-php artisan authorization:sync --prune     # also delete permissions no longer declared
-```
-
-`--prune` deletes every permission under the guard the registry no longer
-declares — enable it only when permissions are managed solely through this
-package. `PermissionSync::plan()` returns the same diff programmatically.
+Permissions the registry no longer declares are left in place — delete them by
+hand if they bother you.
 
 ## Tenancy
 
@@ -366,8 +306,6 @@ One tenancy layer, switched on by config. Publish it with
     'model' => App\Models\Organization::class,   // null = no tenancy
     'foreign_key' => 'organization_id',
     'session_key' => 'current_organization_id',
-    'enterable_scope' => null,                    // local scope name, e.g. 'active'
-    'fallback_to_owned' => false,                 // several tenants ⇒ the owned one
     'strict' => env('APP_ENV') !== 'production',
     'missing_tenant_redirect' => null,            // route name, e.g. 'organizations.pick'
 ],
@@ -383,25 +321,15 @@ tenants plus global roles (`team_id NULL`). One resolver (`Tenancy\TenantResolve
 
 1. the `session_key` value, honoured only while the user is a member of that tenant
    (a global super-admin may enter any tenant that exists); a stale key is dropped;
-2. otherwise the user's **sole** enterable tenant;
-3. otherwise, with `fallback_to_owned => true` (needs ownership on), the sole
-   enterable tenant they own;
-4. otherwise none — several tenants and no session choice never pick an arbitrary
+2. otherwise the user's **sole** existing tenant;
+3. otherwise none — several tenants and no session choice never pick an arbitrary
    row (`EnsureTenantSelected` then 403s / redirects to `missing_tenant_redirect`).
 
-A tenant is entered only while its row exists and passes `enterable_scope` (a local
-scope on the tenant model, e.g. `scopeActive`) — for members and super-admins alike.
-Deactivate a tenant and its users fall out of it on their next request. Whenever
-the resolver drops a stale session choice it dispatches `Tenancy\TenantChoiceDropped`
-(`$user`, `$tenantId`) — listen to it for a "you were removed from X" flash.
-
-A tenant switcher writes the choice through the resolver, never the session key:
-
-```php
-$resolver = resolve(TenantResolver::class);
-$resolver->choose($request->user(), $organization);  // 403 (AuthorizationException) unless enterable
-$resolver->clearChoice();                            // next request: sole enterable tenant, else none
-```
+A tenant whose row is gone (soft-deleted included) is never entered, for members and
+super-admins alike. A tenant switcher writes `TenantResolver::sessionKey()` into the
+session and calls `Tenancy::set()`; the resolver re-validates the key on the next
+request. Anything narrower (only active tenants, a default among several) is the
+app's picker logic, not the package's.
 
 ```php
 use AlexPavliukov\Authorization\Tenancy\Concerns\HasMembers;            // tenant model
@@ -497,8 +425,7 @@ autofilled, and with neither it still throws. NULL rows are visible only under b
 sees only that tenant. Cross-tenant route bindings
 404, and so does restoration: Livewire model props and `SerializesModels` jobs
 keep `TenantScope` (only it — a soft-deleted model still restores), so a replayed
-snapshot carrying another tenant's key fails to hydrate. `TenantScopedPolicy` reads the same `CurrentTenant` (no `resolveTenantUsing()`
-needed) and stays as defence-in-depth.
+snapshot carrying another tenant's key fails to hydrate. `TenantScopedPolicy` reads the same `CurrentTenant` and stays as defence-in-depth.
 
 ### Bypass and switching
 
@@ -579,20 +506,9 @@ $organization->owner();                // BelongsTo<Foundation\Auth\User> (HasMe
   alike; query-builder deletes bypass it.
 - The column never grants access: policies, the resolver and `members()` read roles only.
 - `AuthorizationSeeder` re-derives every owner row from the column and removes any other
-  owner-role row in the team (`authorization:repair-ownership` runs it ad hoc). Tenants
+  owner-role row in the team. Tenants
   with a `NULL` owner are skipped; a missing column is reported and skipped instead of failing.
 - The package never deletes tenants or cascades — archive (soft delete) them.
-
-### Areas
-
-`Tenancy\CurrentArea` answers "which UI area" (`platform | organization | member …`)
-by matching the route name against the `Str::is` patterns in
-`config('authorization.areas')` (default `*platform.*` etc., so `admin.platform.x`
-matches), falling back to a session view mode (`set()`) and then the first
-configured area. On `/livewire/update` it matches the route of the page the
-component was rendered on (from the verified snapshot), not `livewire.update`.
-Off-request (console, queue, `Livewire::test`) there is no route, so the fallback
-applies. It knows nothing about the tenant — that split is deliberate.
 
 ### Testing
 
@@ -607,25 +523,10 @@ $this->assertFailsClosed(Post::class);   // the per-model fail-closed contract
 
 ## Teams
 
-When Spatie native teams are enabled (`config('permission.teams') === true`)
-without the tenancy layer, wire `SetPermissionsTeam` yourself in `bootstrap/app.php`
-(`$middleware->web(append: [SetPermissionsTeam::class])`) — the package registers no
-group middleware. It resolves the current team id via the bound `TeamResolver`
-(default: `DefaultTeamResolver`, which reads the user's `team_foreign_key`
-attribute) and calls `setPermissionsTeamId()`. With tenancy on, `SetCurrentTenant`
-replaces it.
-
-Provide a custom resolver with `Authorization::resolveTeamsUsing(YourResolver::class)`.
-
-When the team is derived from session or request-scoped context rather than a
-column on the user, pass a closure instead — it is wrapped in a
-`CallbackTeamResolver` and receives the current `Request`:
-
-```php
-Authorization::resolveTeamsUsing(
-    fn (Request $request): int|string|null => $request->session()->get('current_team_id'),
-);
-```
+With Spatie native teams enabled (`config('permission.teams') === true`) the
+tenancy layer's `SetCurrentTenant` sets the permissions team per request. Teams
+without tenancy are not a package concern: call `setPermissionsTeamId()` from your
+own middleware.
 
 ### Temporary team context
 
@@ -680,32 +581,6 @@ roles and read them again within the same request, drop the memo first:
 ```php
 $user->assignRole($role);
 Authorization::forgetUserRoles($user);
-```
-
-### Memoized permission checks
-
-`Authorization::userCan()` answers a permission check and memoizes the verdict for
-the request, keyed by `(user identity, permission, active permissions team)`. It
-sits beside the role reads above and shares their lifecycle (bound `scoped`, so the
-memo is flushed on each Octane request / queue job, and never leaks across users or
-teams). It wraps `$user->can()`, so the `Gate::before` bypass and any policies still
-apply — the memo just avoids re-running the whole Gate pipeline for a check whose
-answer is stable within the request. This pays off when an auth-aware query scope
-issues the same check on every query:
-
-```php
-Authorization::userCan($user, 'view any users');                 // permission name
-Authorization::userCan($user, Ability::VIEW, $model);            // (ability, model) pair
-```
-
-`AbstractPolicy::userCan()` routes through it, so every policy check is memoized for
-free. The memo assumes the verdict is a pure function of `(user, permission, active
-team)` for the request; after granting or revoking mid-request, drop it first —
-`forgetUserRoles()` also flushes it, since a role change alters effective permissions:
-
-```php
-$user->givePermissionTo($permission);
-Authorization::forgetUserPermissions($user);   // or forgetUserRoles() after a role change
 ```
 
 ## Testing

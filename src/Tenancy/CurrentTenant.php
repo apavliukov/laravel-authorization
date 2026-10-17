@@ -79,12 +79,6 @@ final class CurrentTenant
         return $role instanceof BackedEnum || is_string($role) ? ModelHasRolesQuery::roleName($role) : null;
     }
 
-    /** Several enterable tenants and no session choice ⇒ the one the user owns (ownership must be on). */
-    public function fallsBackToOwned(): bool
-    {
-        return config('authorization.tenancy.fallback_to_owned') === true;
-    }
-
     public function singleMembership(): bool
     {
         return config('authorization.tenancy.memberships') === 'single';
@@ -94,10 +88,6 @@ final class CurrentTenant
     {
         if ($this->ownerRole() !== null && ! is_string(config('authorization.tenancy.owner_key'))) {
             throw new LogicException('authorization.tenancy.owner_role is set but owner_key is null.');
-        }
-
-        if ($this->fallsBackToOwned() && $this->ownerKey() === null) {
-            throw new LogicException('authorization.tenancy.fallback_to_owned needs ownership: set owner_role.');
         }
 
         if (! in_array(config('authorization.tenancy.memberships', 'multiple'), ['multiple', 'single'], true)) {

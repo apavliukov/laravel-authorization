@@ -1,6 +1,6 @@
 {
     "name": "apavliukov/laravel-authorization",
-    "description": "Reusable, Spatie-permission-based authorization layer for Laravel: policies, abilities, roles, a permission registry, and a pluggable admin bypass.",
+    "description": "Reusable, Spatie-permission-based authorization layer for Laravel: policies, abilities, roles, a permission registry, tenancy, and a super-admin bypass.",
     "type": "library",
     "license": "MIT",
     "authors": [

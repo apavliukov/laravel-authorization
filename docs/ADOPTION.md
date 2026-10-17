@@ -47,16 +47,13 @@ decide each one explicitly before refactoring:
    provides `AbstractPolicy` + `ownsModel()` and you keep your own `Gate::before`).
    Prefer migrating — it's the whole point of unifying.
 4. **Which role(s) are super-admin?** (`AuthorizationRole::isSuperAdmin()` → true.)
-   **Under teams**, the default `RoleBypass` reads the **global** assignment
+   **Under teams**, the bypass reads the **global** assignment
    (`team_id IS NULL`) regardless of the active team: a platform admin bypasses
    inside any tenant; a tenant-scoped copy of the role never bypasses. Identity and
    bypass are both team-agnostic — delete any local `holdsPlatformAdminRole()`-style
    workaround.
-5. **Bypass policy:** default `RoleBypass` (super-admins bypass everything)? Any
-   abilities that must always go through policies even for super-admins
-   (`protected`)? Or no god-mode at all (`NoBypass`)?
-6. **System abilities** the app needs (model-less gates, e.g. "access admin area").
-7. **Custom (non-CRUD) abilities** per model (e.g. `impersonate`, `publish`).
+5. **System abilities** the app needs (model-less gates, e.g. "access admin area").
+6. **Custom (non-CRUD) abilities** per model (e.g. `impersonate`, `publish`).
 
 ---
 
@@ -73,7 +70,7 @@ Ability (package enum)  the 7 CRUD verbs (camelCase = policy method names)
 SystemAbility (APP enum)  model-less gates — the package ships none
 
 AuthorizationManager (singleton)  holds: role enum class + authorizable models
-Authorization (facade)            useRoleEnum / authorizableModels / bypassUsing / resolveTeamsUsing / resolveTenantUsing / tenantColumn / systemAbilities
+Authorization (facade)            useRoleEnum / authorizableModels
                                   withTeam / userHasGlobalRole / userHasRoleInTeam / userHasRole / userRolesInTeam / primaryRole / forgetUserRoles
 
 PermissionRegistry   ability + model → "{ability words} {table}"  (e.g. "view any users")
@@ -81,17 +78,15 @@ Support\Permissions  fluent builder for AuthorizationRole::permissions() (for/on
 AbstractPolicy       view/update/delete/restore/forceDelete = ownsModel() && userCan()
                      viewAny/create = userCan()    ownsModel() default true (override to scope)
 TenantScopedPolicy   ownsModel() = current tenant === model's owning key (attribute tenancy)
-BypassGate + BypassStrategy   one Gate::before; RoleBypass (default) | NoBypass | your own
-PermissionSync + AuthorizationSeeder   plan()/apply(prune) + idempotent seeding; authorization:sync command
-Teams (optional)     DefaultTeamResolver | CallbackTeamResolver + SetPermissionsTeam middleware (wire it in bootstrap/app.php)
-Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam / primaryRole / userCan (memoized, request-scoped) + HasTeamAwareRoles query scopes
+Gate::before (provider)   super-admin bypass — true for a super-admin, else null; never false
+PermissionSync + AuthorizationSeeder   apply(): idempotent permission + role-grant seeding
+Team-aware reads     userHas{Global,InTeam,}Role / userRolesInTeam / primaryRole / userCan + HasTeamAwareRoles query scopes (role reads memoized per request)
 Testing\InteractsWithAuthorization   test primitives (assignRoleInTeam / withPermissionsTeam / roleModelId / resetPermissionsTeam)
 Tenancy (config-driven)   CurrentTenant (+ Tenancy facade) | BelongsToTenant + TenantScope (fail-closed) | TenantResolver (session → sole tenant → none)
-                          SetCurrentTenant / EnsureTenantSelected / EnsurePlatformArea | TenantMembership (add/changeRole/remove/assignGlobal/removeGlobal/transferOwnership/tenantIdsOf) | CurrentArea
+                          SetCurrentTenant / EnsureTenantSelected / EnsurePlatformArea | TenantMembership (add/changeRole/remove/assignGlobal/removeGlobal/transferOwnership/tenantIdsOf)
                           Concerns\HasMembers (tenant) / Concerns\HasTenantMemberships (user) — relations through model_has_roles
 Concerns\HasAppRole      $user->app_role / $user->is_platform_admin (team-agnostic identity; also without tenancy)
 Testing\InteractsWithTenancy   actingAsInTenant / withoutTenant / forTenant / assertFailsClosed
-make:authorization-policy {Model}    scaffolds a policy
 ```
 
 Resolution order for any `can()` / `authorize()` / `@can`:
@@ -106,34 +101,26 @@ Resolution order for any `can()` / `authorize()` / `@can`:
 
 | Symbol | Kind | Use |
 |---|---|---|
-| `Authorization` (facade) | facade | `useRoleEnum()`, `authorizableModels()`, `bypassUsing()`, `resolveTeamsUsing()` |
+| `Authorization` (facade) | facade | `useRoleEnum()`, `authorizableModels()` |
 | `Contracts\AuthorizationRole` | interface | implemented by the app's role enum: `isSuperAdmin(): bool`, `permissions(): string[]`, static `byPriority(): list<self>` |
-| `Contracts\BypassStrategy` | interface | `shouldBypass(Authenticatable $user, string $ability): bool` |
-| `Contracts\TeamResolver` | interface | `resolve(Request): int\|string\|null` |
 | `AbstractPolicy` | abstract | extend per model; implement `getModelClass()`; override `ownsModel()` for tenancy |
 | `Concerns\HasPolicy` | trait | on each policy-protected model; `getBasicAbilities()` / `getCustomAbilities()` |
 | `Enums\Ability` | enum | the 7 CRUD abilities |
 | `PermissionRegistry` | service | `nameFromAbility()`, `allPermissions()` (rarely called directly) |
-| `Support\RoleBypass` / `NoBypass` | strategies | default / no-god-mode bypass |
 | `Database\AuthorizationSeeder` | seeder | call from the app's seeder |
-| `Teams\DefaultTeamResolver` / `CallbackTeamResolver` / `SetPermissionsTeam` | teams | used only when teams are on; `CallbackTeamResolver` resolves the team from a closure (session/request context) |
 | team-aware reads (facade) | facade | `userHasGlobalRole()`, `userHasRoleInTeam()`, `userHasRole()` (any team), `userRolesInTeam()`, `forgetUserRoles()` — memoized per request |
-| `userCan()` (facade) | facade | permission check memoized per request by `(user, permission, active team)`; policies route through it; `forgetUserPermissions()` invalidates |
+| `userCan()` (facade) | facade | `$user->can()` for a permission name or an (ability, model) pair; policies route through it |
 | `Concerns\HasTeamAwareRoles` | trait | query scopes `whereHasGlobalRole` / `whereHasRoleInTeam` / `whereHasRole` |
 | `withTeam()` (facade) | facade | run a callback under a temporary permissions team, restoring the previous one |
-| `Database\PermissionSync` | service | `plan()` (diff) / `apply(bool $prune)`; backs `AuthorizationSeeder` |
-| `authorization:sync` | command | sync permissions/role grants; `--dry-run` preview, `--prune` deletes undeclared permissions |
+| `Database\PermissionSync` | service | `apply()`; backs `AuthorizationSeeder` |
 | `Testing\InteractsWithAuthorization` | trait | test primitives for team-aware role state |
-| `TenantScopedPolicy` | abstract | attribute-tenancy base; `resolveTenantUsing()` + `tenantColumn()` declare tenant + owning column, override `tenantKey()` for relations |
+| `TenantScopedPolicy` | abstract | attribute-tenancy base on `Tenancy::id()` + `tenancy.foreign_key`; override `tenantKey()` for relations |
 | `Support\Permissions` | builder | fluent `make()->for()->only()->forAll()->all()` for `AuthorizationRole::permissions()` |
 | `primaryRole()` (facade) | facade | highest-priority role the user holds (first held case in `byPriority()`), for routing |
-| `systemAbilities()` (facade) | facade | register deny-by-default gates for an app system-ability enum |
-| `make:authorization-policy {Model}` | command | scaffolds a policy |
 
 The core `AuthorizationServiceProvider` is **auto-discovered**. It binds the
-manager/resolver/strategy, registers the single `Gate::before`, registers the
-teams middleware (only when `config('permission.teams') === true`), registers the
-generator command, and publishes the provider stub.
+manager, registers the single `Gate::before`, wires the tenancy layer when
+`tenancy.model` is set, and publishes the provider stub and the config.
 
 ---
 
@@ -197,11 +184,11 @@ oohire, lead-crm); treat divergences as things to fix.
 - **Naming**: `Organization` / `organization_id` are the config defaults and the name
   every app converges on (rename `Company`, `Team`, …). URLs: `/platform/*` platform
   area, `/admin/*` tenant area, `/candidate/*` where that audience exists, `/settings/*`
-  area-less; route names keep the `admin.{area}.` prefix (`authorization.areas` matches
-  on names). Public slug routes reserve every first segment the router already owns —
+  area-less; route names keep the `admin.{area}.` prefix. Public slug routes reserve every first segment the router already owns —
   derive the list from the router, do not hand-maintain it.
-- **Area ≠ tenant.** `CurrentArea` answers "which UI area", `CurrentTenant` "which
-  tenant"; a view-mode switcher sets the area, an organization picker sets the tenant.
+- **Area ≠ tenant.** The UI area (platform / organization / …) is the app's routing
+  concern; `CurrentTenant` answers only "which tenant". A view-mode switcher sets
+  the area, an organization picker sets the tenant.
 - **The app owns**: the tenant model and its CRUD, the role enum, policies, business
   invariants, and what happens to a deleted tenant's child records. **Tenants are
   archived (soft delete)**, not hard-deleted: members lose access through the resolver,
@@ -230,7 +217,7 @@ oohire, lead-crm); treat divergences as things to fix.
   listener on the user model stops soft and hard Eloquent deletes (archived tenants
   count). A soft delete through the query builder (`User::query()->delete()`) bypasses
   it — don't.
-- **Self-healing**: `AuthorizationSeeder` (and `authorization:repair-ownership`) re-derive
+- **Self-healing**: `AuthorizationSeeder` re-derives
   every tenant's owner row from `owner_id` and drop any other owner-role row in the team.
 - **`tenancy.memberships => 'single'`** makes `add / changeRole / transferOwnership`
   throw `Tenancy\MembershipPolicyException` for a user who already holds a role in
@@ -311,25 +298,19 @@ Adapt to the project; the order is a guide, not a script.
    Apply tenancy and custom abilities via the recipes in §5.
 8. **Seeding**: replace the app's permission/role seeders with a call to
    `AuthorizationSeeder` from `DatabaseSeeder`/consistency seeder
-   (`$this->call([AuthorizationSeeder::class])`). Delete the old ones. For
-   on-demand syncing replace any bespoke sync command with `authorization:sync`
-   (`--dry-run` / `--prune`).
-9. **Bypass**: default is `RoleBypass`. Switch with `Authorization::bypassUsing(...)`
-   in the provider if the project needs `NoBypass` or `protected` abilities.
-10. **Run the app's test suite** and fix fallout. Re-seed.
+   (`$this->call([AuthorizationSeeder::class])`). Delete the old ones, including
+   any bespoke sync command.
+9. **Run the app's test suite** and fix fallout. Re-seed.
 
 ---
 
 ## 5. Recipes
 
-**Tenancy by attribute (no Spatie teams)** — e.g. `company_id`. Extend the
-package's `TenantScopedPolicy`; declare the tenant source and owning column once:
+**Tenant fence in a policy** — extend the package's `TenantScopedPolicy`; it compares
+`Tenancy::id()` with the model's `tenancy.foreign_key` column (defence in depth
+beside `BelongsToTenant`):
 
 ```php
-// in the published AuthorizationServiceProvider::boot()
-Authorization::resolveTenantUsing(static fn (User $user): ?int => $user->company?->id);
-Authorization::tenantColumn('company_id');   // default owning column (defaults to tenant_id)
-
 // most policies: just the model
 final readonly class LocationPolicy extends TenantScopedPolicy
 {
@@ -343,18 +324,14 @@ final readonly class ReviewPolicy extends TenantScopedPolicy
 
     protected function tenantKey(Model $model): int|string|null
     {
-        return $model->location?->company_id;
+        return $model->location?->organization_id;
     }
 }
 ```
 
-The resolver closure may type-hint the concrete user model, so scoped policies
-never touch `$user` and need no `/** @var User */` narrowing.
-
 **Tenancy with Spatie teams** — turn teams on; role/permission assignments become
-team-scoped automatically (with tenancy on `SetCurrentTenant` sets the team id per
-request; without it wire `SetPermissionsTeam` in `bootstrap/app.php` yourself — the
-package registers no group middleware). Use `ownsModel()` only as an extra
+team-scoped automatically (`SetCurrentTenant` sets the team id per request; teams
+without tenancy are the app's own middleware). Use `ownsModel()` only as an extra
 ownership fence if needed. No bypass for tenant admins.
 
 **"Manage across the tenant OR own it"** — override the method (CRUD methods are
@@ -377,11 +354,11 @@ self::OWNER => Permissions::make()
     ->all(),
 ```
 
-**System (model-less) abilities** — keep the app's enum; register deny-by-default
-gates in one call (only the super-admin bypass grants them), check with `@can`:
+**System (model-less) abilities** — keep the app's enum; register a deny-by-default
+gate per case in the provider (only the super-admin bypass grants it), check with `@can`:
 
 ```php
-Authorization::systemAbilities(SystemAbility::class);   // gates wired; use @can(SystemAbility::X->value)
+Gate::define(SystemAbility::ACCESS_PLATFORM_ADMIN->value, static fn (): bool => false);
 ```
 
 **Primary role for routing** — replace a hand-rolled "highest-priority role" loop
@@ -408,11 +385,6 @@ public function publish(Authenticatable $user, Model $model): bool
 **Restrict which abilities a model exposes** (e.g. no SoftDeletes) — override
 `getBasicAbilities()` to drop `RESTORE`/`FORCE_DELETE`.
 
-**Custom bypass** — implement `Contracts\BypassStrategy` and
-`Authorization::bypassUsing(YourStrategy::class)`, or rebind the contract. The
-strategy receives `(Authenticatable $user, string $ability)` — **no model**, by
-design (model-scoped logic belongs in policies, not the bypass).
-
 **Team-aware role reads (teams on)** — ask about role membership in a *specific*
 team, *any* team, or globally, **without** switching the active team — replacing
 hand-written `model_has_roles` queries. Add `Concerns\HasTeamAwareRoles` to the
@@ -437,16 +409,6 @@ works in terms of a Spatie `role_id`, bridge it to a name at the boundary
 (`Role::findById($id)->name`) and use the name-based reads — the package keeps a
 single name/enum identity axis.
 
-**Memoized permission checks** — `Authorization::userCan($user, $permission[, $model])`
-answers a permission check and memoizes the verdict per request, keyed by
-`(user, permission, active team)`, alongside the role reads above. It wraps
-`$user->can()` (bypass + policies still apply) and is what `AbstractPolicy::userCan()`
-routes through, so every policy check is memoized for free — the win lands when an
-auth-aware query scope repeats the same check on every query. Flush after a
-mid-request grant with `forgetUserPermissions($user)` (or `forgetUserRoles()` after a
-role change, which flushes it too). Replaces a bespoke per-request `can()` memo on
-the user model.
-
 **Temporary team context** — run a callback under a given team, restoring the
 previous one (even on throw):
 
@@ -454,21 +416,8 @@ previous one (even on throw):
 Authorization::withTeam($teamId, fn () => $user->assignRole($role));
 ```
 
-**Session / closure team resolution** — when the tenant comes from session or
-request context rather than a column on the user, pass a closure (wrapped in
-`CallbackTeamResolver`); return `null` for "no team" (e.g. a platform admin):
-
-```php
-Authorization::resolveTeamsUsing(
-    fn (Request $request): int|string|null => $request->session()->get('current_team_id'),
-);
-```
-
-**Permission sync / prune** — seed idempotently via `AuthorizationSeeder`, or run
-the `authorization:sync` command: `--dry-run` previews the create/remove +
-grant/revoke diff, `--prune` deletes permissions the registry no longer declares
-(opt-in; only when permissions are managed solely through the package).
-`PermissionSync::plan()` returns the same diff programmatically.
+**Permission sync** — seed idempotently via `AuthorizationSeeder` on every deploy.
+Permissions the registry no longer declares are left in place.
 
 **Testing** — `use Testing\InteractsWithAuthorization` for team-aware test
 primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
@@ -492,9 +441,6 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
   `userRolesInTeam` / `whereHasRole*`) and `withTeam()`.
 - A bespoke per-request memo on the user model for a role check → the team-aware
   reads are already memoized; use `forgetUserRoles()` to invalidate.
-- A bespoke per-request memo on the user model for a `can()` check (e.g. an
-  auth-aware query scope) → use `userCan()`; policies already route through it.
-  Invalidate with `forgetUserPermissions()` (or `forgetUserRoles()`).
 - A `users.<tenant>_id` column or a `<tenant>_user` pivot kept in sync with
   `model_has_roles` by hand → delete it; membership is the role row.
 - Copy-pasted `->when($isPlatformAdmin, fn ($q) => $q->withoutGlobalScope(...))`
@@ -526,9 +472,9 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
   passes `assertFailsClosed()`; a user with several memberships and no session choice
   is redirected to the picker, never 403 and never an arbitrary tenant.
 - The role enum's `byPriority()` lists every case exactly once, in the order the
-  product wants (`authorization:sync` passes).
+  product wants (the seeder passes).
 - With ownership on: every tenant has an `owner_id` and its owner role row, and
-  `authorization:repair-ownership` reports `0 created, 0 removed`.
+  a re-run of the seeder reports `0 created, 0 removed`.
 
 ---
 
@@ -537,5 +483,5 @@ primitives (`assignRoleInTeam()`, `withPermissionsTeam()`, `roleModelId()`,
 The package README documents installation, setup, abilities, the bypass, seeding,
 and teams from the consumer's point of view. This guide complements it with the
 *why* and the *migration*. When in doubt about behavior, read the package source —
-it is small and the contracts (`AuthorizationRole`, `BypassStrategy`,
-`TeamResolver`) are the only seams between the core and the app.
+it is small and `Contracts\AuthorizationRole` is the only seam between the core
+and the app.

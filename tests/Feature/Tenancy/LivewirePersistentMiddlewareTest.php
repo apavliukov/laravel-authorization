@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Tests\Feature\Tenancy;
 
 use AlexPavliukov\Authorization\AuthorizationServiceProvider;
-use AlexPavliukov\Authorization\Tenancy\CurrentArea;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\EnsurePlatformArea;
 use AlexPavliukov\Authorization\Tenancy\EnsureTenantSelected;
@@ -13,7 +12,6 @@ use AlexPavliukov\Authorization\Tenancy\TenantMembership;
 use AlexPavliukov\Authorization\Tenancy\TenantResolver;
 use AlexPavliukov\Authorization\Testing\InteractsWithAuthorization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
-use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\AreaProbe;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\PostCounter;
@@ -42,7 +40,6 @@ use Symfony\Component\HttpFoundation\Response;
 #[CoversClass(AuthorizationServiceProvider::class)]
 #[CoversClass(EnsurePlatformArea::class)]
 #[CoversClass(EnsureTenantSelected::class)]
-#[CoversClass(CurrentArea::class)]
 final class LivewirePersistentMiddlewareTest extends TenancyTestCase
 {
     use InteractsWithAuthorization;
@@ -67,7 +64,6 @@ final class LivewirePersistentMiddlewareTest extends TenancyTestCase
         $this->withoutMiddleware(PreventRequestForgery::class);
         Livewire::component('post-counter', PostCounter::class);
         Livewire::component('post-title', PostTitle::class);
-        Livewire::component('area-probe', AreaProbe::class);
 
         $this->acme = Organization::query()->create(['name' => 'Acme']);
         $this->globex = Organization::query()->create(['name' => 'Globex']);
@@ -83,7 +79,6 @@ final class LivewirePersistentMiddlewareTest extends TenancyTestCase
             '<html><body>@livewire(\'post-title\', [\'post\' => $post])</body></html>',
             ['post' => Post::query()->where('title', 'a')->firstOrFail()],
         ))->name('admin.organization.post');
-        Route::middleware('web')->get('/member/area', static fn (): string => Blade::render('<html><body>@livewire(\'area-probe\')</body></html>'))->name('admin.member.area');
     }
 
     #[Test]
@@ -132,14 +127,6 @@ final class LivewirePersistentMiddlewareTest extends TenancyTestCase
         $this->withSession([TenantResolver::sessionKey() => $this->globex->id]);
 
         $this->callAction($page, 'load')->assertNotFound();
-    }
-
-    #[Test]
-    public function a_component_action_sees_the_area_of_the_page_it_was_rendered_on(): void
-    {
-        $page = $this->actingAs(User::factory()->create())->get('/member/area')->assertOk();
-
-        $this->callAction($page, 'load')->assertOk()->assertSee('area:member');
     }
 
     /**

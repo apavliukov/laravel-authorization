@@ -74,46 +74,13 @@ final class PermissionSyncTest extends TestCase
     }
 
     #[Test]
-    public function plan_lists_creations_and_role_grants_on_a_clean_database(): void
-    {
-        $plan = resolve(PermissionSync::class)->plan();
-
-        $this->assertContains('view any users', $plan['permissions']['create']);
-        $this->assertCount(7, $plan['permissions']['create']);
-        $this->assertSame([], $plan['permissions']['remove']);
-        $this->assertEqualsCanonicalizing(['view users', 'update users'], $plan['roles']['editor']['grant']);
-        $this->assertSame([], $plan['roles']['admin']['grant']);
-    }
-
-    #[Test]
-    public function plan_reports_undeclared_permissions_as_removals(): void
-    {
-        Permission::query()->create(['name' => 'legacy ability', 'guard_name' => 'web']);
-
-        $plan = resolve(PermissionSync::class)->plan();
-
-        $this->assertContains('legacy ability', $plan['permissions']['remove']);
-    }
-
-    #[Test]
-    public function apply_without_prune_keeps_undeclared_permissions(): void
+    public function apply_keeps_undeclared_permissions(): void
     {
         Permission::query()->create(['name' => 'legacy ability', 'guard_name' => 'web']);
 
         resolve(PermissionSync::class)->apply();
 
         $this->assertDatabaseHas('permissions', ['name' => 'legacy ability']);
-        $this->assertDatabaseHas('permissions', ['name' => 'view any users']);
-    }
-
-    #[Test]
-    public function apply_with_prune_removes_undeclared_permissions(): void
-    {
-        Permission::query()->create(['name' => 'legacy ability', 'guard_name' => 'web']);
-
-        resolve(PermissionSync::class)->apply(true);
-
-        $this->assertDatabaseMissing('permissions', ['name' => 'legacy ability']);
         $this->assertDatabaseHas('permissions', ['name' => 'view any users']);
     }
 
@@ -127,24 +94,6 @@ final class PermissionSyncTest extends TestCase
         // MEMBER declares [] — a stray permission on it must be revoked on re-seed.
         SpatieRole::findByName(Role::MEMBER->value, 'web')->givePermissionTo('view users');
         $this->assertTrue(SpatieRole::findByName(Role::MEMBER->value, 'web')->hasPermissionTo('view users'));
-
-        $sync->apply();
-
-        $this->assertFalse(SpatieRole::findByName(Role::MEMBER->value, 'web')->hasPermissionTo('view users'));
-    }
-
-    #[Test]
-    public function plan_and_apply_agree_for_an_empty_role(): void
-    {
-        Permission::findOrCreate('view users', 'web');
-        $sync = resolve(PermissionSync::class);
-        $sync->apply();
-
-        SpatieRole::findByName(Role::MEMBER->value, 'web')->givePermissionTo('view users');
-
-        $plan = $sync->plan();
-        $this->assertSame(['view users'], $plan['roles']['member']['revoke']);
-        $this->assertSame([], $plan['roles']['member']['grant']);
 
         $sync->apply();
 

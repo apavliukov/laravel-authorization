@@ -50,16 +50,6 @@ final class OwnershipOffTest extends TenancyTestCase
     }
 
     #[Test]
-    public function fallback_to_owned_without_ownership_is_a_config_error(): void
-    {
-        config(['authorization.tenancy.fallback_to_owned' => true]);
-
-        $this->expectException(LogicException::class);
-
-        resolve(CurrentTenant::class)->assertValidConfig();
-    }
-
-    #[Test]
     public function an_unknown_membership_policy_is_a_config_error(): void
     {
         config(['authorization.tenancy.memberships' => 'one']);

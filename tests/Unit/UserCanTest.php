@@ -6,7 +6,6 @@ namespace AlexPavliukov\Authorization\Tests\Unit;
 
 use AlexPavliukov\Authorization\Authorization;
 use AlexPavliukov\Authorization\AuthorizationManager;
-use AlexPavliukov\Authorization\Support\UserPermissionMemo;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TeamsTestCase;
@@ -14,11 +13,9 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
 use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role as SpatieRole;
 
 #[Group('policies')]
 #[CoversClass(AuthorizationManager::class)]
-#[CoversClass(UserPermissionMemo::class)]
 final class UserCanTest extends TeamsTestCase
 {
     #[Test]
@@ -40,29 +37,6 @@ final class UserCanTest extends TeamsTestCase
     }
 
     #[Test]
-    public function a_verdict_is_memoized_within_the_request_until_forgotten(): void
-    {
-        setPermissionsTeamId(5);
-        Permission::findOrCreate('view users', 'web');
-
-        $user = $this->createUser('memo@example.test');
-        $user->givePermissionTo('view users');
-
-        $manager = resolve(AuthorizationManager::class);
-
-        $this->assertTrue($manager->userCan($user, 'view users'));
-
-        $user->revokePermissionTo('view users');
-
-        $this->assertFalse($user->can('view users'));
-        $this->assertTrue($manager->userCan($user, 'view users'));
-
-        $manager->forgetUserPermissions($user);
-
-        $this->assertFalse($manager->userCan($user, 'view users'));
-    }
-
-    #[Test]
     public function a_verdict_recomputes_when_the_active_team_switches(): void
     {
         Permission::findOrCreate('view users', 'web');
@@ -80,52 +54,6 @@ final class UserCanTest extends TeamsTestCase
         $this->assertFalse($manager->userCan($freshUnderOtherTeam, 'view users'));
 
         setPermissionsTeamId(null);
-    }
-
-    #[Test]
-    public function a_grant_made_mid_request_is_reflected_after_forgetting(): void
-    {
-        setPermissionsTeamId(5);
-        Permission::findOrCreate('view users', 'web');
-
-        $user = $this->createUser('invalidation@example.test');
-
-        $manager = resolve(AuthorizationManager::class);
-
-        $this->assertFalse($manager->userCan($user, 'view users'));
-
-        $user->givePermissionTo('view users');
-
-        $this->assertTrue($user->can('view users'));
-        $this->assertFalse($manager->userCan($user, 'view users'));
-
-        $manager->forgetUserPermissions($user);
-
-        $this->assertTrue($manager->userCan($user, 'view users'));
-    }
-
-    #[Test]
-    public function forgetting_roles_also_flushes_the_permission_memo(): void
-    {
-        setPermissionsTeamId(5);
-        Permission::findOrCreate('view users', 'web');
-        SpatieRole::findByName(Role::EDITOR->value, 'web')->givePermissionTo('view users');
-
-        $user = $this->createUser('role-driven@example.test');
-        $user->assignRole(Role::EDITOR->value);
-
-        $manager = resolve(AuthorizationManager::class);
-
-        $this->assertTrue($manager->userCan($user, 'view users'));
-
-        $user->removeRole(Role::EDITOR->value);
-
-        $this->assertFalse($user->can('view users'));
-        $this->assertTrue($manager->userCan($user, 'view users'));
-
-        $manager->forgetUserRoles($user);
-
-        $this->assertFalse($manager->userCan($user, 'view users'));
     }
 
     #[Test]

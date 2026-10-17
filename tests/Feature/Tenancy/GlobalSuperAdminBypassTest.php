@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization\Tests\Feature\Tenancy;
 
-use AlexPavliukov\Authorization\Support\RoleBypass;
+use AlexPavliukov\Authorization\AuthorizationServiceProvider;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Testing\InteractsWithAuthorization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
@@ -17,7 +17,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
 
 #[Group('tenancy')]
-#[CoversClass(RoleBypass::class)]
+#[CoversClass(AuthorizationServiceProvider::class)]
 final class GlobalSuperAdminBypassTest extends TenancyTestCase
 {
     use InteractsWithAuthorization;

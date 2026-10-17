@@ -8,7 +8,6 @@ use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\EnsurePlatformArea;
 use AlexPavliukov\Authorization\Tenancy\EnsureTenantSelected;
 use AlexPavliukov\Authorization\Tenancy\SetCurrentTenant;
-use AlexPavliukov\Authorization\Tenancy\TenantChoiceDropped;
 use AlexPavliukov\Authorization\Tenancy\TenantResolver;
 use AlexPavliukov\Authorization\Testing\InteractsWithAuthorization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Role;
@@ -16,8 +15,6 @@ use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Organization;
 use AlexPavliukov\Authorization\Tests\Fixtures\Tenancy\Post;
 use AlexPavliukov\Authorization\Tests\Fixtures\User;
 use AlexPavliukov\Authorization\Tests\TenancyTestCase;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -45,16 +42,6 @@ final class TenantMiddlewareTest extends TenancyTestCase
 
         Route::middleware('web')->get('/tenant', static fn (): string => (string) resolve(CurrentTenant::class)->id());
         Route::middleware(['web', EnsureTenantSelected::class])->get('/needs-tenant', static fn (): string => 'ok');
-        Route::middleware('web')->post('/choose/{id}', static function (Request $request, string $id): string {
-            resolve(TenantResolver::class)->choose($request->user() ?? abort(401), $id);
-
-            return (string) resolve(CurrentTenant::class)->id();
-        });
-        Route::middleware('web')->post('/clear', static function (): string {
-            resolve(TenantResolver::class)->clearChoice();
-
-            return (string) resolve(CurrentTenant::class)->id();
-        });
         Route::middleware(['web', EnsurePlatformArea::class])->get('/platform', static fn (): int => Post::query()->count());
     }
 
@@ -114,23 +101,6 @@ final class TenantMiddlewareTest extends TenancyTestCase
     }
 
     #[Test]
-    public function dropping_a_stale_session_choice_dispatches_an_event(): void
-    {
-        Event::fake([TenantChoiceDropped::class]);
-        $user = User::factory()->create();
-        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
-
-        $this->actingAs($user)->get('/tenant');
-        Event::assertNotDispatched(TenantChoiceDropped::class);
-
-        $this->actingAs($user)->withSession([TenantResolver::sessionKey() => $this->globex->id])->get('/tenant');
-        Event::assertDispatched(
-            TenantChoiceDropped::class,
-            fn (TenantChoiceDropped $event): bool => $event->user->getAuthIdentifier() === $user->id && $event->tenantId === $this->globex->id,
-        );
-    }
-
-    #[Test]
     public function a_global_super_admin_may_enter_any_tenant_that_exists(): void
     {
         $admin = User::factory()->create();
@@ -161,74 +131,6 @@ final class TenantMiddlewareTest extends TenancyTestCase
             ->get('/tenant')
             ->assertContent('')
             ->assertSessionMissing(TenantResolver::sessionKey());
-    }
-
-    #[Test]
-    public function a_tenant_outside_the_enterable_scope_is_dropped_from_the_session_even_for_a_super_admin(): void
-    {
-        config()->set('authorization.tenancy.enterable_scope', 'active');
-        $this->acme->update(['is_active' => false]);
-        $user = User::factory()->create();
-        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
-        $admin = User::factory()->create();
-        $this->assignRoleInTeam($admin, Role::ADMIN, null);
-
-        foreach ([$user, $admin] as $actor) {
-            $this->actingAs($actor)
-                ->withSession([TenantResolver::sessionKey() => $this->acme->id])
-                ->get('/tenant')
-                ->assertContent('')
-                ->assertSessionMissing(TenantResolver::sessionKey());
-        }
-    }
-
-    #[Test]
-    public function the_sole_enterable_tenant_is_picked_among_several_memberships(): void
-    {
-        $user = User::factory()->create();
-        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
-        $this->assignRoleInTeam($user, Role::MEMBER, $this->globex->id);
-        $this->acme->update(['is_active' => false]);
-
-        $this->actingAs($user)->get('/tenant')->assertContent('');
-
-        config()->set('authorization.tenancy.enterable_scope', 'active');
-
-        $this->actingAs($user)->get('/tenant')->assertContent((string) $this->globex->id);
-    }
-
-    #[Test]
-    public function choose_activates_the_tenant_now_and_remembers_it_for_the_next_request(): void
-    {
-        $user = User::factory()->create();
-        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
-        $this->assignRoleInTeam($user, Role::MEMBER, $this->globex->id);
-
-        $this->actingAs($user)->post('/choose/'.$this->globex->id)
-            ->assertContent((string) $this->globex->id)
-            ->assertSessionHas(TenantResolver::sessionKey(), $this->globex->id);
-        $this->actingAs($user)->get('/tenant')->assertContent((string) $this->globex->id);
-
-        $this->actingAs($user)->post('/clear')->assertContent('')->assertSessionMissing(TenantResolver::sessionKey());
-        $this->actingAs($user)->get('/tenant')->assertContent('');
-    }
-
-    #[Test]
-    public function choose_refuses_a_tenant_the_user_may_not_enter_and_keeps_the_current_choice(): void
-    {
-        config()->set('authorization.tenancy.enterable_scope', 'active');
-        $user = User::factory()->create();
-        $this->assignRoleInTeam($user, Role::MEMBER, $this->acme->id);
-        $inactive = Organization::query()->create(['name' => 'Initech', 'is_active' => false]);
-        $this->assignRoleInTeam($user, Role::MEMBER, $inactive->id);
-
-        foreach ([$this->globex->id, $inactive->id, 999] as $id) {
-            $this->actingAs($user)
-                ->withSession([TenantResolver::sessionKey() => $this->acme->id])
-                ->post('/choose/'.$id)
-                ->assertForbidden()
-                ->assertSessionHas(TenantResolver::sessionKey(), $this->acme->id);
-        }
     }
 
     #[Test]

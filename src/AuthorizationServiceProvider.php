@@ -4,17 +4,7 @@ declare(strict_types=1);
 
 namespace AlexPavliukov\Authorization;
 
-use AlexPavliukov\Authorization\Console\MakePolicyCommand;
-use AlexPavliukov\Authorization\Console\RepairOwnershipCommand;
-use AlexPavliukov\Authorization\Console\SyncCommand;
-use AlexPavliukov\Authorization\Contracts\BypassStrategy;
-use AlexPavliukov\Authorization\Contracts\TeamResolver;
-use AlexPavliukov\Authorization\Support\BypassGate;
 use AlexPavliukov\Authorization\Support\ModelHasRolesQuery;
-use AlexPavliukov\Authorization\Support\RoleBypass;
-use AlexPavliukov\Authorization\Support\UserPermissionMemo;
-use AlexPavliukov\Authorization\Teams\DefaultTeamResolver;
-use AlexPavliukov\Authorization\Tenancy\CurrentArea;
 use AlexPavliukov\Authorization\Tenancy\CurrentTenant;
 use AlexPavliukov\Authorization\Tenancy\EnsurePlatformArea;
 use AlexPavliukov\Authorization\Tenancy\EnsureTenantSelected;
@@ -29,9 +19,6 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
-use Livewire\Mechanisms\HandleRequests\HandleRequests;
-
-use function Livewire\on;
 
 final class AuthorizationServiceProvider extends ServiceProvider
 {
@@ -42,14 +29,15 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->app->singleton(AuthorizationManager::class);
         $this->app->singleton(CurrentTenant::class);
         $this->app->scoped(ModelHasRolesQuery::class);
-        $this->app->scoped(UserPermissionMemo::class);
-        $this->app->bind(TeamResolver::class, DefaultTeamResolver::class);
-        $this->app->singleton(BypassStrategy::class, RoleBypass::class);
     }
 
     public function boot(): void
     {
-        BypassGate::register();
+        // Super-admin bypass: holders of a super-admin role pass every gate check. With
+        // Spatie teams on, only the GLOBAL assignment counts (see isSuperAdmin()).
+        // Never false — that would veto a granted permission.
+        $manager = $this->app->make(AuthorizationManager::class);
+        Gate::before(static fn (Authenticatable $user): ?bool => $manager->isSuperAdmin($user) ? true : null);
         // Always: "platform admin without tenants" is a config state, not an app-side Gate::define.
         Gate::define(EnsurePlatformArea::GATE, static fn (): bool => false);
 
@@ -70,13 +58,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             }
         }
 
-        if (class_exists(Livewire::class)) {
-            $this->rememberLivewireOriginalRoute();
-        }
-
         if ($this->app->runningInConsole()) {
-            $this->commands([MakePolicyCommand::class, RepairOwnershipCommand::class, SyncCommand::class]);
-
             $this->publishes([
                 __DIR__.'/stubs/AuthorizationServiceProvider.stub' => app_path('Providers/AuthorizationServiceProvider.php'),
             ], 'authorization-provider');
@@ -85,18 +67,6 @@ final class AuthorizationServiceProvider extends ServiceProvider
                 __DIR__.'/../config/authorization.php' => config_path('authorization.php'),
             ], 'authorization-config');
         }
-    }
-
-    /** /livewire/update matches no area pattern: let CurrentArea see the page's route instead. */
-    private function rememberLivewireOriginalRoute(): void
-    {
-        on('snapshot-verified', static function (array $snapshot): void {
-            if (! resolve(HandleRequests::class)->isLivewireRoute()) {
-                return;
-            }
-
-            resolve(CurrentArea::class)->rememberOriginalRoute(data_get($snapshot, 'memo.path'), data_get($snapshot, 'memo.method'));
-        });
     }
 
     /**

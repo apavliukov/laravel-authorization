@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace AlexPavliukov\Authorization\Tests\Fixtures;
 
 use AlexPavliukov\Authorization\Authorization;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 /**
  * Mirrors what a real consumer's published AuthorizationServiceProvider stub does:
- * declares the role enum + authorizable models and defines system abilities.
+ * declares the role enum + authorizable models and defines a system ability gate.
  */
 final class TestAuthorizationServiceProvider extends ServiceProvider
 {
@@ -21,6 +22,6 @@ final class TestAuthorizationServiceProvider extends ServiceProvider
             User::class,
         ]);
 
-        Authorization::systemAbilities(SystemAbility::class);
+        Gate::define(SystemAbility::ACCESS_PLATFORM_ADMIN->value, static fn (): bool => false);
     }
 }
