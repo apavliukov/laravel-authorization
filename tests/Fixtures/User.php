@@ -19,6 +19,7 @@ class User extends Authenticatable
 
     /** @use HasFactory<UserFactory> */
     use HasFactory;
+
     use HasPolicy;
     use HasRoles;
     use HasTeamAwareRoles;

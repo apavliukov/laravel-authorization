@@ -7,3 +7,10 @@ parameters:
         - src
         - tests
     treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        # Fixtures with a fixed tenantRelationPath() make the trait's creating-hook tail
+        # unreachable *in their context*; it is reachable for every root-owned model.
+        -
+            identifier: deadCode.unreachable
+            path: src/Tenancy/BelongsToTenant.php
+            count: 3 # one per fixture (Vote, ScopedComment, UnfencedComment); a new hit fails
