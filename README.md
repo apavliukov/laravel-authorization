@@ -1,12 +1,23 @@
+[![tests](https://github.com/apavliukov/laravel-authorization/actions/workflows/tests.yml/badge.svg)](https://github.com/apavliukov/laravel-authorization/actions/workflows/tests.yml)
+[![Latest Version](https://img.shields.io/packagist/v/apavliukov/laravel-authorization.svg)](https://packagist.org/packages/apavliukov/laravel-authorization)
+[![PHPStan](https://img.shields.io/badge/PHPStan-level%209-brightgreen.svg)](phpstan.neon)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 # Laravel Authorization
 
 A reusable, Spatie-permission-based authorization layer for Laravel: resource
 policies, ability enums, role semantics, a permission registry, idempotent
-seeding, and a super-admin bypass.
+seeding, and a super-admin bypass. Statically analysed at PHPStan level 9.
 
 The package owns the generic core. Your application keeps only what is genuinely
 app-specific: the role enum, concrete policies, the user model, and the
 declarations wiring them together.
+
+## Why
+
+- Policies map seven CRUD abilities to permission strings once, instead of hand-written `can*` methods per resource.
+- Tenant scoping is fail-closed: a query without tenant context returns nothing, not everything.
+- Seeding is idempotent, so roles and permissions can be re-applied on every deploy.
 
 ## Requirements
 
