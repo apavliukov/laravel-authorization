@@ -136,6 +136,10 @@ final class LivewirePersistentMiddlewareTest extends TenancyTestCase
     private function callAction(TestResponse $page, string $method): TestResponse
     {
         $html = $page->getContent();
+        // Each call is a separate HTTP request; reset Livewire's per-process state (e.g. its
+        // resolved-model cache, since 4.4.2) as a fresh PHP-FPM worker would.
+        Livewire::flushState();
+
         $snapshot = htmlspecialchars_decode((string) str(is_string($html) ? $html : '')->betweenFirst('wire:snapshot="', '"'), ENT_QUOTES | ENT_SUBSTITUTE);
 
         return $this->withHeader('X-Livewire', '1')->postJson(resolve(HandleRequests::class)->getUpdateUri(), [
